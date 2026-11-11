@@ -134,6 +134,22 @@ python scripts/01b_analyze_crossing_coverage.py
 
 It reports the missing SWEA events and per-instrument cadence distributions; results are saved under `results/metrics/coverage_analysis/`. The output will guide targeted, dry-run-costed scientific-data extraction.
 
+## Next step: pilot scientific-data extraction
+
+The offline analysis of saved timestamp-coverage results found median intersample intervals of **1.0 s (MAG)** and **16.0 s (SWEA)**. SWEA is absent from ten labeled windows (one Group 3 event and nine Group 2 events, mostly in September–October 2018).
+
+Before constructing sliding-window training samples, extract and inspect **one label-centered 10-minute window** of real field data and SWEA distributions:
+
+```bash
+# Estimate scanned bytes without querying the data.
+python scripts/02_bigquery_event_pilot.py
+
+# Run the bounded one-event pilot, after reviewing the estimate.
+python scripts/02_bigquery_event_pilot.py --execute
+```
+
+The source arrays and metadata are cached to `data/raw/bigquery_pilot/` and are ignored by Git. This stage uses each instrument's own timestamps, validates SWEA energy/angle axes, and reports observed quality-flag values without assuming their interpretation. See [pilot extraction workflow](docs/bigquery_event_pilot.md).
+
 ## Status
 
-All four annotation groups are integrated. BigQuery table-coverage code is committed but has **not yet been executed against the private BigQuery dataset**; no coverage counts or model-training results are claimed. Next: run the diagnostic locally, inspect per-instrument cadences and gaps, then implement instrument-specific data extraction and window builders.
+All four annotation groups are integrated. BigQuery table-coverage code is committed but has **not yet been executed against the private BigQuery dataset**; no coverage counts or model-training results are claimed. Next: review extracted real MAG/SWEA arrays and quality flags from the one-event pilot, then design instrument-specific window builders.
