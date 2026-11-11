@@ -93,6 +93,27 @@ uv pip install -r requirements.txt
 
 Dependencies are provisional and will be pinned after the environment and first experiment are validated.
 
+## BigQuery coverage diagnostic
+
+A first diagnostic script is available at `scripts/01_bigquery_crossing_coverage.py`. It evaluates how many of the 569 labeled crossings have timestamp coverage for a **10-minute window** centered at the MPB label, treating MAG and SWEA independently with a **one-native-sample window stride** planned for training and inference.
+
+It only scans `datetime_utc` for relevant date partitions, defaults to **dry-run estimates**, and does not download complete magnetic-field or electron-flux time series.
+
+```bash
+# Check actual schemas and partitioning (metadata only).
+python scripts/01_bigquery_crossing_coverage.py --metadata-only
+
+# Pilot: estimate cost for five events, then query those events.
+python scripts/01_bigquery_crossing_coverage.py --limit-events 5
+python scripts/01_bigquery_crossing_coverage.py --limit-events 5 --execute
+
+# All 569 labels: estimate first, execute second.
+python scripts/01_bigquery_crossing_coverage.py
+python scripts/01_bigquery_crossing_coverage.py --execute
+```
+
+See [coverage workflow](docs/bigquery_coverage.md) for safety limits, outputs, interpretation and next steps.
+
 ## Status
 
-Annotations integrated; no training or evaluation result is yet claimed. Next: inspect BigQuery table schemas, build synchronized MAG/SWEA windows, define targets, train/test partitions and reconstruction/detection losses.
+All four annotation groups are integrated. BigQuery table-coverage code is committed but has **not yet been executed against the private BigQuery dataset**; no coverage counts or model-training results are claimed. Next: run the diagnostic locally, inspect per-instrument cadences and gaps, then implement instrument-specific data extraction and window builders.
