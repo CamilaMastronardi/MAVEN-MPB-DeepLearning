@@ -20,6 +20,7 @@ data/labels/*
 !data/labels/README.md
 !data/labels/group1.csv
 !data/labels/group2.csv
+!data/labels/group3.csv
 !data/labels/group4.csv
 !data/labels/mpb_crossings.csv
 models/*
