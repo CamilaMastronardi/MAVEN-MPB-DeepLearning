@@ -55,7 +55,7 @@ The small curated CSV sources and the unified table are tracked in `data/labels/
 ## Data sources and preparation
 
 - **BigQuery:** MAG, SWEA and MAVEN position tables.
-- Cache limited date/time selections locally to avoid repeated full-table queries.
+- Keep MAG and SWEA measurements in BigQuery; stream bounded, date-partition-filtered intervals to transient RAM only. Avoid persistent local raw/processed datasets and avoid one SQL query per sliding-window shift.
 - Handle cadence differences, measurement gaps, timing alignment and train-only scaling.
 - Sample negative or offset windows carefully; absence of a catalog annotation does not prove that no MPB crossing occurred.
 - Assess sensitivity to window duration, stride, Gaussian width and input modalities.
@@ -64,8 +64,8 @@ The small curated CSV sources and the unified table are tracked in `data/labels/
 
 ```text
 data/
-  raw/            # Downloaded measurements (ignored by Git)
-  processed/      # Aligned series and windows (ignored)
+  raw/            # Unused for scientific observations: measurements stay in BigQuery
+  processed/      # Unused for persisted windows: construct windows in RAM
   labels/         # Small, versioned crossing tables
 notebooks/        # Exploration
 src/
@@ -134,22 +134,24 @@ python scripts/01b_analyze_crossing_coverage.py
 
 It reports the missing SWEA events and per-instrument cadence distributions; results are saved under `results/metrics/coverage_analysis/`. The output will guide targeted, dry-run-costed scientific-data extraction.
 
-## Next step: pilot scientific-data extraction
+## Next step: BigQuery-only scientific data pilot
 
-The offline analysis of saved timestamp-coverage results found median intersample intervals of **1.0 s (MAG)** and **16.0 s (SWEA)**. SWEA is absent from ten labeled windows (one Group 3 event and nine Group 2 events, mostly in September–October 2018).
+The offline timestamp diagnostic found median per-event cadences of **1 s (MAG)** and **16 s (SWEA)**. To avoid filling the local computer with MAVEN observations, scientific measurements remain **only in BigQuery**.
 
-Before constructing sliding-window training samples, extract and inspect **one label-centered 10-minute window** of real field data and SWEA distributions:
+The updated `scripts/02_bigquery_event_pilot.py` queries one label-centered **10-minute** interval in both instruments. It computes diagnostics in **RAM** and does **not write `.npz`, raw flux files, or other scientific-data copies locally**. Before each query it estimates BigQuery bytes; `--execute` is required to run it.
+
+For SWEA, an exploratory valid-angular-bin energy spectrum is computed **inside BigQuery** and only the reduced energy-time samples are transmitted. This is not yet a physically validated omnidirectional flux; quality flag handling and energy-channel validity require review.
 
 ```bash
-# Estimate scanned bytes without querying the data.
+# Dry-run only: estimated BigQuery query cost.
 python scripts/02_bigquery_event_pilot.py
 
-# Run the bounded one-event pilot, after reviewing the estimate.
+# If the estimate is acceptable: print one-event MAG/SWEA diagnostics.
 python scripts/02_bigquery_event_pilot.py --execute
 ```
 
-The source arrays and metadata are cached to `data/raw/bigquery_pilot/` and are ignored by Git. This stage uses each instrument's own timestamps, validates SWEA energy/angle axes, and reports observed quality-flag values without assuming their interpretation. See [pilot extraction workflow](docs/bigquery_event_pilot.md).
+See [BigQuery-only pilot workflow](docs/bigquery_event_pilot.md). In training, query temporal blocks once and form all overlapping one-native-sample-stride windows **within RAM**, rather than running BigQuery for every window.
 
 ## Status
 
-All four annotation groups are integrated. BigQuery table-coverage code is committed but has **not yet been executed against the private BigQuery dataset**; no coverage counts or model-training results are claimed. Next: review extracted real MAG/SWEA arrays and quality flags from the one-event pilot, then design instrument-specific window builders.
+All four annotation groups are integrated. Timestamp coverage has been measured for 569 MAG and 559 SWEA events. The BigQuery-only scientific-data pilot is ready but has **not yet been executed**; no model training results are claimed. Next: inspect in-RAM pilot output, verify SWEA quality/energy aggregation, and implement native-time sliding-window iterators.
