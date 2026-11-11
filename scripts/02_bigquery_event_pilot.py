@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
-"""Pilot extraction of 10-minute MAG and SWEA measurements at MPB labels.
+"""Inspect one to three 10-minute MPB windows directly from BigQuery.
 
-Default: BigQuery dry-run only. Execute explicitly with --execute.
-Preserves independent MAG/SWEA native timestamps; no cross-instrument resampling.
-Stores raw SWEA angular-energy cubes and a provisional angle-mean spectrogram.
+Dry-run by default. --execute processes bounded query results in RAM, not files.
+SWEA's angular average is computed remotely in BigQuery per energy/time sample;
+this is an exploratory feature, not calibrated omnidirectional electron flux.
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
-import json
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -19,309 +18,258 @@ import numpy as np
 from google.cloud import bigquery
 
 PROJECT = "maven-vignes-crossings"
-MAG_TABLE = f"{PROJECT}.maven.mag_fields"
-SWEA_TABLE = f"{PROJECT}.maven.swea_svy3d"
-SWEA_AXES = f"{PROJECT}.maven.swea_svy3d_axes"
+MAG = f"{PROJECT}.maven.mag_fields"
+SWEA = f"{PROJECT}.maven.swea_svy3d"
+AXES = f"{PROJECT}.maven.swea_svy3d_axes"
 LABELS = Path("data/labels/mpb_crossings.csv")
-DEST = Path("data/raw/bigquery_pilot")
 GIB = 1024 ** 3
-HALF_WINDOW_SECONDS = 300
 
 MAG_SQL = """
-SELECT
-  datetime_utc, bx_ss_nt, by_ss_nt, bz_ss_nt, b_total_nt,
-  range_b, source_file
-FROM `{table}`
+SELECT datetime_utc, bx_ss_nt, by_ss_nt, bz_ss_nt, b_total_nt, range_b
+FROM `{mag}`
 WHERE DATE(datetime_utc) IN UNNEST(@days)
-  AND datetime_utc BETWEEN @start_time AND @end_time
+  AND datetime_utc BETWEEN @start AND @end
 ORDER BY datetime_utc
 """
 
+# Angular bins stay on the BigQuery server. The client receives only one
+# flux average and count per energy, for each SWEA epoch.
 SWEA_SQL = """
-SELECT
-  d.datetime_utc, d.quality, d.source_file, d.diff_en_fluxes,
-  a.energy_ev, a.elev_deg, a.azim_deg,
-  a.n_elev, a.n_azim, a.n_energy
-FROM `{data_table}` AS d
-INNER JOIN `{axes_table}` AS a
-  ON d.source_file = a.source_file
+SELECT d.datetime_utc, d.quality, d.source_file,
+       a.energy_ev, a.n_elev, a.n_azim, a.n_energy,
+       ARRAY_LENGTH(d.diff_en_fluxes) AS original_flux_count,
+       ARRAY(
+         SELECT AS STRUCT
+           MOD(offset_index, a.n_energy) AS energy_index,
+           AVG(IF(
+             flux IS NOT NULL AND NOT IS_NAN(flux)
+             AND NOT IS_INF(flux) AND flux >= 0,
+             flux, NULL
+           )) AS mean_flux,
+           COUNTIF(
+             flux IS NOT NULL AND NOT IS_NAN(flux)
+             AND NOT IS_INF(flux) AND flux >= 0
+           ) AS valid_count
+         FROM UNNEST(d.diff_en_fluxes) AS flux WITH OFFSET AS offset_index
+         GROUP BY energy_index
+         ORDER BY energy_index
+       ) AS energy_bins
+FROM `{swea}` AS d
+JOIN `{axes}` AS a USING (source_file)
 WHERE DATE(d.datetime_utc) IN UNNEST(@days)
-  AND d.datetime_utc BETWEEN @start_time AND @end_time
+  AND d.datetime_utc BETWEEN @start AND @end
 ORDER BY d.datetime_utc
 """
 
 
-def parse_args() -> argparse.Namespace:
+def args_parser():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--labels", type=Path, default=LABELS)
-    p.add_argument("--output-dir", type=Path, default=DEST)
-    p.add_argument("--limit-events", type=int, default=1,
-                   help="Number of chronological labels (default 1, max 3 for pilot).")
-    p.add_argument("--execute", action="store_true",
-                   help="Execute queries after estimating scanned bytes.")
-    p.add_argument("--max-query-gib", type=float, default=1.0,
-                   help="Safety limit per BigQuery data query.")
-    p.add_argument("--max-total-gib", type=float, default=2.0,
-                   help="Safety limit on estimated bytes for the complete pilot.")
-    return p.parse_args()
+    p.add_argument("--limit-events", type=int, default=1)
+    p.add_argument("--execute", action="store_true")
+    p.add_argument("--max-query-gib", type=float, default=1.0)
+    p.add_argument("--max-total-gib", type=float, default=2.0)
+    return p
 
 
-def utc_time(value) -> datetime:
+def to_utc(value):
     if isinstance(value, str):
         value = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if value.tzinfo is None:
-        raise ValueError("Expected timezone-aware UTC timestamp.")
+        raise ValueError("Time must have an explicit UTC offset.")
     return value.astimezone(timezone.utc)
 
 
-def to_iso(value: datetime) -> str:
-    return utc_time(value).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def chosen_labels(path: Path, n: int) -> list[dict]:
-    with path.open(newline="", encoding="utf-8") as file:
-        labels = [
-            {"time": utc_time(row["mpb_timestamp_utc"]),
-             "source_group": row["source_group"]}
-            for row in csv.DictReader(file)
+def events_from_csv(path, number):
+    with path.open(encoding="utf-8", newline="") as f:
+        events = [
+            to_utc(row["mpb_timestamp_utc"])
+            for row in csv.DictReader(f)
         ]
-    labels.sort(key=lambda e: e["time"])
-    return labels[:n]
+    events.sort()
+    if len(events) < number:
+        raise ValueError(f"Only {len(events)} event labels found")
+    return events[:number]
 
 
-def query_config(start: datetime, end: datetime, *,
-                 dry_run: bool, max_bytes: int) -> bigquery.QueryJobConfig:
-    days = sorted({start.date(), end.date()})
-    opts = {
-        "query_parameters": [
-            bigquery.ArrayQueryParameter("days", "DATE", days),
-            bigquery.ScalarQueryParameter("start_time", "TIMESTAMP", start),
-            bigquery.ScalarQueryParameter("end_time", "TIMESTAMP", end),
-        ],
+def query_config(start, end, *, dry_run, max_bytes):
+    options = {
         "dry_run": dry_run,
         "use_query_cache": not dry_run,
+        "query_parameters": [
+            bigquery.ArrayQueryParameter(
+                "days", "DATE", sorted({start.date(), end.date()})
+            ),
+            bigquery.ScalarQueryParameter("start", "TIMESTAMP", start),
+            bigquery.ScalarQueryParameter("end", "TIMESTAMP", end),
+        ],
     }
-    # Do not set maximum_bytes_billed=None in a dry run: some clients
-    # serialize it into a BadRequest-producing literal "None".
+    # Never send maximum_bytes_billed=None to BigQuery in dry-run mode.
     if not dry_run:
-        opts["maximum_bytes_billed"] = int(max_bytes)
-    return bigquery.QueryJobConfig(**opts)
+        options["maximum_bytes_billed"] = int(max_bytes)
+    return bigquery.QueryJobConfig(**options)
 
 
-def validate_partitioning(client: bigquery.Client, table_id: str) -> None:
-    table = client.get_table(table_id)
-    if table.time_partitioning is None or table.time_partitioning.field != "datetime_utc":
-        raise RuntimeError(f"Stopped: {table_id} is not partitioned by datetime_utc.")
+def validate_schema(client):
+    for name in (MAG, SWEA):
+        table = client.get_table(name)
+        partitioning = table.time_partitioning
+        if partitioning is None or partitioning.field != "datetime_utc":
+            raise ValueError(f"Unsafe query: {name} not partitioned by datetime_utc")
+    axis_fields = {field.name for field in client.get_table(AXES).schema}
+    expected = {"source_file", "energy_ev", "n_elev", "n_azim", "n_energy"}
+    if not expected <= axis_fields:
+        raise ValueError(f"Missing SWEA axis columns: {sorted(expected - axis_fields)}")
 
 
-def elapsed_statistics(times: list[datetime]) -> dict:
-    if len(times) < 2:
-        return {"n": len(times), "median_dt_s": None, "max_dt_s": None,
-                "duplicates": 0}
-    seconds = np.array([t.timestamp() for t in times], dtype=np.float64)
-    dt = np.diff(seconds)
-    positive = dt[dt > 0]
-    return {
-        "n": len(times),
-        "median_dt_s": float(np.median(positive)) if positive.size else None,
-        "max_dt_s": float(np.max(positive)) if positive.size else None,
-        "duplicates": int(np.count_nonzero(dt == 0)),
-    }
-
-
-def save_mag(rows: list, output: Path) -> dict:
-    if not rows:
-        return {"available": False, "samples": 0}
-    times = [utc_time(r.datetime_utc) for r in rows]
-    vectors = np.asarray([
-        [r.bx_ss_nt, r.by_ss_nt, r.bz_ss_nt, r.b_total_nt]
-        for r in rows
-    ], dtype=np.float64)
-    if np.any(np.diff([x.timestamp() for x in times]) < 0):
-        raise ValueError("MAG times not ordered.")
-    np.savez_compressed(
-        output,
-        times_unix_s=np.asarray([t.timestamp() for t in times]),
-        field_nt=vectors,
-        range_b=np.array([
-            r.range_b if r.range_b is not None else -1 for r in rows
-        ], dtype=np.int64),
+def cadence(rows):
+    timestamps = np.array(
+        [to_utc(row.datetime_utc).timestamp() for row in rows],
+        dtype=float,
     )
-    summary = elapsed_statistics(times)
-    summary.update({
-        "available": True,
-        "samples": len(rows),
-        "nonfinite_field_values": int((~np.isfinite(vectors)).sum()),
-        "source_files": sorted({r.source_file for r in rows if r.source_file}),
-    })
-    return summary
+    dt = np.diff(timestamps)
+    positive = dt[dt > 0]
+    return (
+        float(np.median(positive)) if positive.size else None,
+        float(np.max(positive)) if positive.size else None,
+        int(np.count_nonzero(dt == 0)),
+    )
 
 
-def save_swea(rows: list, output: Path) -> dict:
+def inspect_mag(rows):
     if not rows:
-        return {"available": False, "samples": 0}
+        print("  MAG: no observations")
+        return
+    x = np.array(
+        [[r.bx_ss_nt, r.by_ss_nt, r.bz_ss_nt, r.b_total_nt] for r in rows],
+        dtype=float,
+    )
+    med, maximum, duplicates = cadence(rows)
+    print(
+        f"  MAG samples: {len(rows)}, field shape: {x.shape}, "
+        f"median dt: {med} s, max dt: {maximum} s, "
+        f"duplicate timestamps: {duplicates}, "
+        f"invalid field values: {int((~np.isfinite(x)).sum())}"
+    )
 
+
+def inspect_swea(rows):
+    if not rows:
+        print("  SWEA: no observations")
+        return
+    shapes = set()
     reference_energy = None
-    reference_elev = None
-    reference_azim = None
-    reference_shape = None
-    cubes = []
-    times = []
-    quality = []
-    sources = set()
-    for row in rows:
-        ne, na, nenergy = int(row.n_elev), int(row.n_azim), int(row.n_energy)
-        shape = (ne, na, nenergy)
-        if min(shape) < 1:
-            raise ValueError("Invalid SWEA angular/energy dimensions.")
-        energy = np.asarray(row.energy_ev, dtype=np.float64)
-        elev = np.asarray(row.elev_deg, dtype=np.float64)
-        azim = np.asarray(row.azim_deg, dtype=np.float64)
-        if len(energy) != nenergy:
-            raise ValueError("SWEA energy-axis length does not match n_energy.")
+    flags = Counter()
+    spectra = []
+    counts = []
+    shape_mismatches = 0
+    for r in rows:
+        dims = (int(r.n_elev), int(r.n_azim), int(r.n_energy))
+        shapes.add(dims)
+        if r.original_flux_count != int(np.prod(dims)):
+            shape_mismatches += 1
+        energy = np.asarray(r.energy_ev, dtype=float)
+        if len(energy) != dims[-1]:
+            raise ValueError("SWEA energy axis has wrong dimension")
         if reference_energy is None:
             reference_energy = energy
-            reference_elev = elev
-            reference_azim = azim
-            reference_shape = shape
-        else:
-            if (shape != reference_shape
-                or not np.allclose(energy, reference_energy, rtol=1e-6, atol=1e-6,
-                                   equal_nan=False)
-                or not np.array_equal(elev, reference_elev, equal_nan=True)
-                or not np.array_equal(azim, reference_azim, equal_nan=True)):
-                raise ValueError(
-                    "SWEA energy/angle axes or dimensions differ across epochs: "
-                    "do not combine these frames without separate preprocessing."
-                )
-        flat = np.asarray(row.diff_en_fluxes, dtype=np.float64)
-        if flat.size != ne * na * nenergy:
-            raise ValueError(
-                f"Invalid SWEA flux array length {flat.size}; expected {ne*na*nenergy}"
-            )
-        cubes.append(flat.reshape(shape))  # Original C-order: energy fastest.
-        times.append(utc_time(row.datetime_utc))
-        quality.append(int(row.quality) if row.quality is not None else -1)
-        if row.source_file:
-            sources.add(row.source_file)
-
-    raw_cubes = np.stack(cubes)
-    valid = np.isfinite(raw_cubes) & (raw_cubes >= 0)
-    # Preliminary exploratory representation only; angular response is not
-    # corrected. NOT an omnidirectional flux or validated SWEA feature.
-    valid_counts = valid.sum(axis=(1, 2))
-    finite_sum = np.where(valid, raw_cubes, 0).sum(axis=(1, 2))
-    angle_mean = np.full(valid_counts.shape, np.nan, dtype=np.float64)
-    np.divide(finite_sum, valid_counts, out=angle_mean, where=valid_counts > 0)
-
-    np.savez_compressed(
-        output,
-        times_unix_s=np.asarray([t.timestamp() for t in times]),
-        flux_angular_cube=raw_cubes,
-        angle_mean_flux=angle_mean,
-        valid_angle_count=valid_counts,
-        energy_ev=reference_energy,
-        elev_deg=reference_elev,
-        azim_deg=reference_azim,
-        quality=np.asarray(quality, dtype=np.int64),
-    )
-    summary = elapsed_statistics(times)
-    summary.update({
-        "available": True,
-        "samples": len(rows),
-        "shape_time_elev_azim_energy": list(raw_cubes.shape),
-        "energy_min_ev": float(np.min(reference_energy)),
-        "energy_max_ev": float(np.max(reference_energy)),
-        "nonfinite_or_negative_flux_fraction":
-            float(np.count_nonzero(~valid) / valid.size),
-        "energy_time_cells_without_valid_angular_flux":
-            int(np.count_nonzero(valid_counts == 0)),
-        "quality_counts": dict(Counter(str(x) for x in quality)),
-        "source_files": sorted(sources),
-        "angle_mean_note":
-            "Exploratory valid-bin average only; quality flags not filtered.",
-    })
-    return summary
-
-
-def main() -> None:
-    args = parse_args()
-    if not (1 <= args.limit_events <= 3):
-        raise SystemExit("Pilot uses --limit-events between 1 and 3.")
-    if args.max_query_gib <= 0 or args.max_total_gib <= 0:
-        raise SystemExit("BigQuery limits must be positive.")
-    events = chosen_labels(args.labels, args.limit_events)
-    if len(events) != args.limit_events:
-        raise SystemExit("Fewer label events than requested.")
-
-    client = bigquery.Client(project=PROJECT)
-    validate_partitioning(client, MAG_TABLE)
-    validate_partitioning(client, SWEA_TABLE)
-    queries = []
-    for idx, event in enumerate(events, start=1):
-        t = event["time"]
-        start = t - timedelta(seconds=HALF_WINDOW_SECONDS)
-        end = t + timedelta(seconds=HALF_WINDOW_SECONDS)
-        for name, sql in (
-            ("mag", MAG_SQL.format(table=MAG_TABLE)),
-            ("swea", SWEA_SQL.format(data_table=SWEA_TABLE, axes_table=SWEA_AXES)),
+        elif not np.allclose(
+            energy, reference_energy, rtol=1e-6, atol=1e-6
         ):
-            dry = client.query(
+            raise ValueError("SWEA energy axis changes between samples")
+        spectrum = np.full(dims[-1], np.nan, dtype=float)
+        valid_counts = np.zeros(dims[-1], dtype=int)
+        for b in r.energy_bins:
+            idx = int(b.energy_index)
+            if idx < 0 or idx >= dims[-1]:
+                raise ValueError("Invalid energy bin index")
+            if b.mean_flux is not None:
+                spectrum[idx] = float(b.mean_flux)
+            valid_counts[idx] = int(b.valid_count)
+        spectra.append(spectrum)
+        counts.append(valid_counts)
+        flags[str(r.quality)] += 1
+
+    if len(shapes) != 1:
+        raise ValueError(f"Inconsistent SWEA dimensions: {sorted(shapes)}")
+    spectrogram = np.stack(spectra)
+    count_matrix = np.stack(counts)
+    med, maximum, duplicates = cadence(rows)
+    print(
+        f"  SWEA samples: {len(rows)}, cube dimensions: {next(iter(shapes))}, "
+        f"energy-time shape: {spectrogram.shape}"
+    )
+    print(
+        f"  SWEA median dt: {med} s, max dt: {maximum} s, "
+        f"duplicate timestamps: {duplicates}"
+    )
+    print(
+        f"  SWEA energy range: {reference_energy.min():.3g} .. "
+        f"{reference_energy.max():.3g} eV, bad-length frames: {shape_mismatches}, "
+        f"energy-time bins with no valid angular flux: "
+        f"{int(np.count_nonzero(count_matrix == 0))}/{count_matrix.size}"
+    )
+    print(f"  SWEA quality flag counts: {dict(flags)}")
+    print("  Angular mean is exploratory; not a validated omnidirectional flux.")
+
+
+def main():
+    args = args_parser().parse_args()
+    if not 1 <= args.limit_events <= 3:
+        raise SystemExit("--limit-events must be between 1 and 3")
+    if args.max_query_gib <= 0 or args.max_total_gib <= 0:
+        raise SystemExit("Positive BigQuery byte limits are required")
+
+    events = events_from_csv(args.labels, args.limit_events)
+    client = bigquery.Client(project=PROJECT)
+    validate_schema(client)
+    plans = []
+    for n, tc in enumerate(events, start=1):
+        start = tc - timedelta(seconds=300)
+        end = tc + timedelta(seconds=300)
+        queries = {
+            "MAG": MAG_SQL.format(mag=MAG),
+            "SWEA": SWEA_SQL.format(swea=SWEA, axes=AXES),
+        }
+        for name, sql in queries.items():
+            estimate = client.query(
                 sql, job_config=query_config(start, end, dry_run=True, max_bytes=1)
             )
-            size = int(dry.total_bytes_processed or 0)
-            queries.append({
-                "index": idx, "event": event, "start": start, "end": end,
-                "instrument": name, "sql": sql, "bytes": size,
-            })
+            bytes_estimated = int(estimate.total_bytes_processed or 0)
+            plans.append((n, tc, start, end, name, sql, bytes_estimated))
             print(
-                f"DRY RUN | event {idx} {name}: {to_iso(t)}, "
-                f"estimated scanned={size / GIB:.4f} GiB"
+                f"DRY RUN event {n}, {name}: {tc.isoformat()}, "
+                f"estimated {bytes_estimated / GIB:.5f} GiB"
             )
-    total = sum(q["bytes"] for q in queries)
-    print(f"TOTAL estimated scanned={total / GIB:.4f} GiB")
-    if not args.execute:
-        print("No data query executed. Re-run with --execute if estimates are acceptable.")
-        return
-    per_query_limit = int(args.max_query_gib * GIB)
-    if total > args.max_total_gib * GIB or any(q["bytes"] > per_query_limit for q in queries):
-        raise SystemExit(
-            "Estimated scanned bytes exceed a safety cap. No data queries executed. "
-            "Review --max-query-gib and --max-total-gib before proceeding."
-        )
 
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    results = []
-    for query in queries:
-        i, event, name = query["index"], query["event"], query["instrument"]
-        print(f"RUN | event {i} {name} ...")
-        job = client.query(
-            query["sql"],
-            job_config=query_config(
-                query["start"], query["end"], dry_run=False,
-                max_bytes=per_query_limit,
-            ),
+    total = sum(plan[-1] for plan in plans)
+    print(f"Total estimated: {total / GIB:.5f} GiB")
+    if not args.execute:
+        print("No measurement queries performed; nothing saved locally.")
+        return
+
+    max_one = int(args.max_query_gib * GIB)
+    if total > args.max_total_gib * GIB or any(
+        plan[-1] > max_one for plan in plans
+    ):
+        raise SystemExit("Estimated bytes exceed query caps; no data fetched")
+
+    for n, tc, start, end, name, sql, estimated in plans:
+        print(f"RUN event {n} {name} ({tc.isoformat()})...")
+        result = client.query(
+            sql, job_config=query_config(
+                start, end, dry_run=False, max_bytes=max_one
+            )
         )
-        rows = list(job.result(page_size=250))
-        stamp = event["time"].strftime("%Y%m%dT%H%M%S")
-        path = args.output_dir / f"event_{i:02d}_{stamp}_{name}.npz"
-        summary = save_mag(rows, path) if name == "mag" else save_swea(rows, path)
-        if not rows:
-            path = None
-        results.append({
-            "event_time_utc": to_iso(event["time"]),
-            "source_group": event["source_group"],
-            "instrument": name,
-            "file": str(path) if path else None,
-            "scanned_gib_estimate": query["bytes"] / GIB,
-            **summary,
-        })
-        print(f"  {name}: {summary.get('samples', 0)} time samples; "
-              f"median dt={summary.get('median_dt_s')} s")
-    report = args.output_dir / "pilot_summary.json"
-    report.write_text(json.dumps(results, indent=2, allow_nan=False), encoding="utf-8")
-    print(f"Saved pilot arrays and {report}")
-    print("NOTE: SWEA angular mean and raw flux are unfiltered for instrument quality.")
+        # Only this 10-minute result exists in process memory.
+        rows = list(result.result(page_size=250))
+        if name == "MAG":
+            inspect_mag(rows)
+        else:
+            inspect_swea(rows)
+        del rows
+
+    print("Done: no MAG or SWEA measurements were saved to disk.")
 
 
 if __name__ == "__main__":
