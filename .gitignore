@@ -16,6 +16,12 @@ data/labels/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !data/labels/.gitkeep
+# Curated, small MPB crossing annotations are deliberately versioned
+!data/labels/README.md
+!data/labels/group1.csv
+!data/labels/group2.csv
+!data/labels/group4.csv
+!data/labels/mpb_crossings.csv
 models/*
 !models/.gitkeep
 results/figures/*
