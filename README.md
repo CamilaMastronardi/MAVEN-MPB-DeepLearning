@@ -12,11 +12,11 @@ The physical interpretation of each annotation (`onset`, `center`, or another ma
 
 ## Proposed architecture: convolutional autoencoder + center detection
 
-**Inputs:** synchronized windows of MAVEN measurements, with separate encoders for magnetic-field time series (MAG: `Bx`, `By`, `Bz`, `|B|`) and electron energy-time information (SWEA). Spacecraft position may be used as metadata and later as an additional input. The final SWEA representation and sampling strategy are to be determined from the BigQuery schema.
+**Inputs:** independent MAG and SWEA windows, each using its instrument's own sampling cadence; raw MAG and SWEA measurements do not need to share one time grid. MAG uses `Bx`, `By`, `Bz`, `|B|`; SWEA uses electron energy-time measurements. Spacecraft position can be retained as metadata.
 
-1. **Encoder:** a convolutional representation of each input modality, optionally fused into a shared latent vector `z`.
-2. **Reconstruction branch:** decode the latent representation to approximate the original MAG and/or SWEA window.
-3. **Supervised detection branch:** predict one scalar `s(X_t) in [0, 1]` per window, intended to peak when its center `t` coincides with an annotated `t_MPB`.
+1. **MAG:** independent 1D convolutional autoencoder, reconstruction decoder, and supervised detection head.
+2. **SWEA:** independent convolutional autoencoder, reconstruction decoder, and supervised detection head.
+3. **Output:** each model predicts a separate scalar score `s(X_t) in [0, 1]` per window. Compare separate time-score curves and consider optional late fusion.
 
 A proposed smooth training target for a window centered at `t_c` is
 
@@ -26,7 +26,7 @@ y(t_c) = exp[- (t_c - t_MPB)^2 / (2 sigma^2)]
 
 where `sigma` is a tunable label-smoothing width **not a physical MPB thickness**. When several annotated times are near a window, the target-generation rule must be defined consistently. The output is a learned center-proximity **score**, not automatically a calibrated probability.
 
-During inference, apply the same fixed-width window across the time series with a specified stride, plot the score against the center times, then identify peaks above a chosen threshold. Evaluate event-level precision, recall, F1 and temporal errors at defined matching tolerances. Split contiguous orbit/event blocks rather than overlapping windows to avoid leakage.
+**Initial configuration:** center a **10-minute (600-second)** window at each measurement timestamp and move it by **one sample of the relevant instrument**. This produces separate native-timestamp detection-score curves for MAG and SWEA. At nominal 1 Hz, MAG has approximately 601 samples if both endpoints of `[t_c-300 s, t_c+300 s]` are included; SWEA's count depends on its cadence. Gaps and irregular sampling must be handled within each instrument to obtain suitable CNN inputs. During inference, plot each score against its corresponding window-center timestamp and identify peaks above a chosen threshold. Evaluate event-level precision, recall, F1 and temporal errors at defined matching tolerances. Split contiguous orbit/event blocks rather than overlapping windows to avoid leakage.
 
 A reconstruction objective can help representation learning, but it is not guaranteed to improve detection; compare with a supervised-only CNN baseline.
 
