@@ -1,4 +1,4 @@
-# Initial scientific Python environment; versions to be pinned after first reproducible run.
+# Initial scientific Python environment; pin versions after the first reproducible run.
 numpy
 pandas
 scipy
@@ -6,3 +6,4 @@ matplotlib
 scikit-learn
 torch
 jupyterlab
+google-cloud-bigquery
