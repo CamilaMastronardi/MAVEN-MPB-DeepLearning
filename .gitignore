@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+.env
+.ipynb_checkpoints/
+
+# Data and generated outputs
+data/raw/*
+data/processed/*
+data/labels/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/labels/.gitkeep
+models/*
+!models/.gitkeep
+results/figures/*
+results/metrics/*
+!results/figures/.gitkeep
+!results/metrics/.gitkeep
+
+# System and editor files
+.DS_Store
+.vscode/
+.idea/
