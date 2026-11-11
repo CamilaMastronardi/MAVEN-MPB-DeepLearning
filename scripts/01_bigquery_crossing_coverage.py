@@ -183,12 +183,19 @@ def job_config(
         ),
         bigquery.ArrayQueryParameter("days", "DATE", utc_days_for(events)),
     ]
-    return bigquery.QueryJobConfig(
-        query_parameters=params,
-        dry_run=dry_run,
-        use_query_cache=not dry_run,
-        maximum_bytes_billed=max_bytes if not dry_run else None,
-    )
+    config_kwargs = {
+        "query_parameters": params,
+        "dry_run": dry_run,
+        "use_query_cache": not dry_run,
+    }
+    # Omit maximum_bytes_billed entirely on dry runs: passing None can
+    # serialize as the invalid string "None" with some client versions.
+    if not dry_run:
+        if max_bytes is None or max_bytes <= 0:
+            raise ValueError("Execution requires a positive max_bytes limit.")
+        config_kwargs["maximum_bytes_billed"] = int(max_bytes)
+
+    return bigquery.QueryJobConfig(**config_kwargs)
 
 
 def optional_seconds(value: object | None) -> float | None:
