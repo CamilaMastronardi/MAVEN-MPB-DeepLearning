@@ -114,6 +114,26 @@ python scripts/01_bigquery_crossing_coverage.py --execute
 
 See [coverage workflow](docs/bigquery_coverage.md) for safety limits, outputs, interpretation and next steps.
 
+## Coverage diagnostic result (local BigQuery run, 2026-11-11)
+
+The 569-event timestamp coverage diagnostic completed successfully with an estimated total of **0.2552 GiB processed** across MAG and SWEA:
+
+| Instrument | Windows with any time samples | Preliminary timestamp-QC pass |
+| --- | ---: | ---: |
+| MAG | 569/569 | 569/569 |
+| SWEA | 559/569 | 559/569 |
+| Both | 559/569 | 559/569 |
+
+These figures refer **only to temporal coverage within ±300 s** around the labeled time, not to the validity of MAG vector values or SWEA flux/quality/energy channels.
+
+A new **offline** script summarizes the two saved CSVs without charging BigQuery:
+
+```bash
+python scripts/01b_analyze_crossing_coverage.py
+```
+
+It reports the missing SWEA events and per-instrument cadence distributions; results are saved under `results/metrics/coverage_analysis/`. The output will guide targeted, dry-run-costed scientific-data extraction.
+
 ## Status
 
 All four annotation groups are integrated. BigQuery table-coverage code is committed but has **not yet been executed against the private BigQuery dataset**; no coverage counts or model-training results are claimed. Next: run the diagnostic locally, inspect per-instrument cadences and gaps, then implement instrument-specific data extraction and window builders.
