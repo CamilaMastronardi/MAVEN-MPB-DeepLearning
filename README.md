@@ -1,70 +1,82 @@
 # MAVEN-MPB-DeepLearning
 
-Deep learning for automatic detection and temporal localization of crossings of the Martian Magnetic Pileup Boundary (MPB) using MAVEN observations.
+Automatic detection and temporal localization of Martian Magnetic Pileup Boundary (MPB) crossings using Deep Learning and MAVEN time series.
+
+Final project for **Machine Learning in Geofluids** (DCAO, Universidad de Buenos Aires).
 
 ## Scientific objective
 
-The Magnetic Pileup Boundary (MPB) is a characteristic plasma boundary in the induced magnetosphere of Mars, arising from the interaction of the solar wind with the Martian plasma environment. This project aims to detect candidate MPB crossings automatically and estimate their temporal extent using time series from the MAVEN spacecraft.
+The MPB is a characteristic plasma boundary in the induced magnetosphere of Mars. This project aims to identify MPB crossings in MAVEN measurements and estimate the **single annotated crossing timestamp** for each event.
 
-This repository is developed as the final project for **Machine Learning in Geofluids** (DCAO, Universidad de Buenos Aires).
+**Scope revision:** The available training tables provide one `MPB time` per event, not four physically defined entry/exit times. Accordingly, the original two-stage architecture (binary classifier plus autoencoder and four-time localization head) is **not** the current supervised training objective. No estimate of the full boundary duration can be validated using these labels alone.
 
-## Proposed two-stage approach
+## Proposed model: 1D CNN for time-resolved detection
 
-### Stage 1 — Detection
+- **Input:** windows of MAVEN MAG `Bx`, `By`, `Bz` and `|B|`, sampled on a common time axis.
+- **Output:** a one-dimensional temporal score `p_MPB(t)` at each sample or output time step.
+- **Targets:** smooth Gaussian peaks centered on the timestamps recorded in `MPB time`. The width controls training tolerance; it does **not** represent measured MPB thickness or duration.
+- **Inference:** identify local maxima above a calibrated threshold and apply a minimum-separation rule to reduce duplicate detections.
+- **Evaluation:** event-level precision/recall/F1 within stated temporal tolerances and timing error of matched predictions; avoid splitting overlapping windows from the same event across training and test data.
 
-A one-dimensional convolutional neural network (1D CNN) processes sliding windows of magnetic-field measurements and produces a binary classification score for possible MPB crossings. Candidate detections will be used to select windows for the second stage.
+A simple binary window classifier can serve as a baseline. An autoencoder is optional for later representation learning, not required for the first training runs.
 
-### Stage 2 — Temporal localization
+The physical definition of the original `MPB time` annotations (onset, center, or another marker) still needs verification.
 
-A convolutional autoencoder with an additional temporal-localization head processes candidate crossing windows:
+## Available annotations
 
-- The reconstruction branch learns a latent representation by reconstructing the input signals.
-- The localization branch predicts Gaussian distributions for four characteristic times that delimit the crossing.
-- Temporal-order constraints enforce `t1 < t2 < t3 < t4`.
+Three unique uploaded tables have been retained in `data/labels/`:
 
-The contribution of the reconstruction objective will be assessed against a direct localization baseline.
+| Group | Number of rows |
+| --- | ---: |
+| Group 1 | 108 |
+| Group 2 | 219 |
+| Group 4 | 172 |
+| **Unique annotated timestamps** | **499** |
 
-## Initial input variables
+`data/labels/mpb_crossings.csv` contains the standardized, chronological annotation table. See `data/labels/README.md` for provenance, column definitions, duplicates and quality-control caveats.
 
-- MAVEN MAG: `Bx`, `By`, `Bz`, and `|B|`.
-- Possible future extensions: ion and electron observations from SWIA and SWEA.
+## Data sources and preparation plan
+
+- **BigQuery:** MAG time series and spacecraft positions, with SWEA measurements available for potential multimodal extensions.
+- Start with MAG as the supervised baseline; incorporate SWEA after establishing an end-to-end evaluation.
+- Retrieve and cache selected time intervals rather than repeatedly querying entire BigQuery tables.
+- Handle cadence, gaps, synchronization and scaling; select well-defined training candidates and use care when choosing negatives from incompletely labeled periods.
+- Separate training, validation and test periods by event/orbit or contiguous temporal blocks to reduce information leakage.
 
 ## Project layout
 
 ```text
 data/
-  raw/            # Original data (not tracked by Git)
-  processed/      # Prepared time series (not tracked by Git)
-  labels/         # Crossing annotations (not tracked by Git)
-notebooks/        # Exploratory analyses
+  raw/            # Full downloaded measurements (not tracked)
+  processed/      # Prepared time series and windows (not tracked)
+  labels/         # Versioned small annotation tables
+notebooks/        # Exploration and diagnostics
 src/
-  preprocessing/  # Data preparation and windowing
-  detection/      # Stage 1: binary 1D CNN
-  localization/   # Stage 2: autoencoder and temporal head
-  evaluation/     # Detection and timing metrics
-scripts/          # Executable workflows
-models/           # Trained weights (not tracked by Git)
+  preprocessing/  # BigQuery extraction, QC, windows and targets
+  detection/      # Primary 1D CNN event-localization model
+  localization/   # Reserved for alternative localization experiments
+  evaluation/     # Event matching, metrics and diagnostics
+scripts/          # Reproducible entrypoints
+models/           # Trained weights (not tracked)
 results/
-  figures/        # Generated plots (not tracked by Git)
-  metrics/        # Generated metrics (not tracked by Git)
+  figures/        # Generated plots (not tracked)
+  metrics/        # Generated metrics (not tracked)
 ```
 
-## Status
+## Environment
 
-**Initial repository scaffold.** The network architectures, event-label definitions, window durations, losses, and evaluation protocol will be specified and tested during the project. No trained model or experimental result is claimed at this stage.
-
-## Local setup
+The current development setup uses Python **3.11** and PyTorch on CPU (AMD Picasso integrated graphics has no NVIDIA CUDA device).
 
 ```bash
 git clone https://github.com/CamilaMastronardi/MAVEN-MPB-DeepLearning.git
 cd MAVEN-MPB-DeepLearning
-python3 -m venv .venv
+uv venv --python 3.11
 source .venv/bin/activate
-python -m pip install -r requirements.txt
+uv pip install -r requirements.txt
 ```
 
-The dependency list is provisional; exact versions will be pinned after the development environment is validated.
+The dependencies in `requirements.txt` are provisional and should be pinned after a reproducible run.
 
-## Data policy
+## Status
 
-Raw MAVEN observations, processed datasets, annotations, and model weights are excluded from ordinary Git tracking. Store large scientific datasets outside the repository or use a dedicated data artifact workflow.
+Dataset annotations are committed. The training-dataset builder, negative sampling, window duration, Gaussian width, model architecture, and event-matching tolerance will be selected and tested iteratively. No model-training result is claimed yet.
