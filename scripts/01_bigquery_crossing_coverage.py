@@ -31,7 +31,7 @@ WITH events AS (
 ),
 matched AS (
   SELECT e.event_time, d.datetime_utc
-  FROM \`{table_id}\` AS d
+  FROM `{table_id}` AS d
   INNER JOIN events AS e
     ON d.datetime_utc BETWEEN
       TIMESTAMP_SUB(e.event_time, INTERVAL 300 SECOND)
