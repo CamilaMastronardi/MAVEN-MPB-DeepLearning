@@ -152,6 +152,17 @@ python scripts/02_bigquery_event_pilot.py --execute
 
 See [BigQuery-only pilot workflow](docs/bigquery_event_pilot.md). In training, query temporal blocks once and form all overlapping one-native-sample-stride windows **within RAM**, rather than running BigQuery for every window.
 
+## CPU performance benchmark
+
+The repository includes a **synthetic** CPU training benchmark for two lightweight autoencoders with detection heads: MAG Conv1D `[batch,4,601]` and SWEA Conv2D `[batch,1,64,38]`. It uses PyTorch only, does **not** query BigQuery, and does **not** write measurements or benchmark files to disk.
+
+```bash
+python scripts/03_benchmark_cpu.py --threads 3
+python scripts/03_benchmark_cpu.py --threads 6
+```
+
+Run exactly the same command on the office and personal PCs to compare median milliseconds per training step and approximate windows per second; compare the numbers separately for MAG and SWEA. Results are a relative compute benchmark, not trained model performance.
+
 ## Status
 
 All four annotation groups are integrated. Timestamp coverage has been measured for 569 MAG and 559 SWEA events. The BigQuery-only scientific-data pilot is ready but has **not yet been executed**; no model training results are claimed. Next: inspect in-RAM pilot output, verify SWEA quality/energy aggregation, and implement native-time sliding-window iterators.
