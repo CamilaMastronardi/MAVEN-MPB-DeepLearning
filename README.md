@@ -194,6 +194,18 @@ python scripts/04_make_cv_splits.py
 
 See [cross-validation design and leakage caveats](docs/cross_validation.md). **No scientific data are downloaded**, and no model has yet been trained. The splitting is by labeled event/month, not by individual overlapping window. Future data loaders will create native-cadence MAG and 30–100 eV SWEA windows in RAM after fold assignment.
 
+## Native-cadence sliding-window pilot (MAG and SWEA)
+
+The split-aware window generator is in `scripts/windowing.py`, with a BigQuery-to-RAM pilot in `scripts/05_bigquery_window_pilot.py`. For a selected CV fold/event, it retrieves each instrument's **70-minute** block once (window centers within ±30 min of the labeled MPB, with ±5 min support) and yields **600-second windows, one native sample apart**. It rejects missing-edge, large-gap, and nonfinite windows; retains native MAG/SWEA cadences and SWEA energy channels in **30–100 eV**; creates a Gaussian target from the nearest *known* MPB annotation in the current training or validation subset.
+
+```bash
+python -m unittest discover -s tests -v
+python scripts/05_bigquery_window_pilot.py --fold 1 --subset val
+python scripts/05_bigquery_window_pilot.py --fold 1 --subset val --execute
+```
+
+By default the pilot performs **dry-run estimates only**. `--execute` queries at most one selected event by default, checks byte/row caps, generates window statistics in RAM, and **does not save scientific measurement arrays locally**. See [window generation details](docs/window_generation.md). This stage does not assume that low-target windows are verified physical negatives, and does not fit normalization using held-out data.
+
 ## Status
 
-All four annotation groups are integrated. Timestamp coverage has been measured for 569 MAG and 559 SWEA events. The first BigQuery-only pilot ran successfully for MAG and SWEA without persisting scientific data. The **30–100 eV** SWEA restriction has been committed but not yet rechecked in a second pilot. Cross-validation event splits (4 monthly-grouped folds) have been created and versioned; no model training results are claimed. Next: confirm 30–100 eV channel count, implement split-aware native-time sliding-window iterators, and select training-only normalization.
+All four annotation groups are integrated. Timestamp coverage has been measured for 569 MAG and 559 SWEA events. The first BigQuery-only pilot ran successfully for MAG and SWEA without persisting scientific data. The **30–100 eV** SWEA restriction has been committed but not yet rechecked in a second pilot. Cross-validation event splits (4 monthly-grouped folds) have been created and versioned; no model training results are claimed. Next: run the fold-aware MAG/SWEA window pilot, inspect accepted/rejected window counts and observed 30–100 eV channels, then design train-only normalization and conservative negative sampling.
