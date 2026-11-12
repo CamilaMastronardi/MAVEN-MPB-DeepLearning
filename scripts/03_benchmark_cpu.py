@@ -98,6 +98,14 @@ def benchmark(model: nn.Module, x: torch.Tensor, *, warmup: int,
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument(
+        "--swea-energy-bins", type=int, default=64,
+        help="Number of selected SWEA channels; use the measured 30–100 eV count.",
+    )
+    parser.add_argument(
+        "--swea-time-samples", type=int, default=38,
+        help="SWEA temporal samples per example; e.g. 18 for this 32-s-cadence pilot.",
+    )
     parser.add_argument("--threads", type=int, default=None,
                         help="PyTorch CPU threads; default: current torch setting")
     parser.add_argument("--warmup", type=int, default=3)
@@ -105,8 +113,10 @@ def main() -> None:
     parser.add_argument("--repeats", type=int, default=3)
     args = parser.parse_args()
 
-    if args.batch_size < 1 or args.warmup < 0 or args.steps < 1 or args.repeats < 1:
-        parser.error("batch-size, steps, repeats must be positive; warmup >= 0")
+    if (args.batch_size < 1 or args.warmup < 0 or args.steps < 1
+        or args.repeats < 1 or args.swea_energy_bins < 1
+        or args.swea_time_samples < 1):
+        parser.error("Batch size, steps, repeats, and SWEA dimensions must be positive; warmup >= 0")
     if args.threads is not None:
         if args.threads < 1:
             parser.error("threads must be positive")
@@ -118,11 +128,16 @@ def main() -> None:
     print(f"Device used: CPU; PyTorch threads: {torch.get_num_threads()}")
     print(f"Batch size: {args.batch_size}; warmup: {args.warmup}; "
           f"steps/repeat: {args.steps}; repeats: {args.repeats}")
-    print("Inputs: MAG [batch,4,601]; SWEA [batch,1,64,38] (synthetic)")
+    print(
+        f"Inputs: MAG [batch,4,601]; SWEA "
+        f"[batch,1,{args.swea_energy_bins},{args.swea_time_samples}] (synthetic)"
+    )
 
     cases = [
         ("MAG Conv1D", MagAutoencoder(), torch.randn(args.batch_size, 4, 601)),
-        ("SWEA Conv2D", SweaAutoencoder(), torch.randn(args.batch_size, 1, 64, 38)),
+        ("SWEA Conv2D", SweaAutoencoder(), torch.randn(
+            args.batch_size, 1, args.swea_energy_bins, args.swea_time_samples
+        )),
     ]
     for name, model, x in cases:
         step_s, throughput, variability = benchmark(
