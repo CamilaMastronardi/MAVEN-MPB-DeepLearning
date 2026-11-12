@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 from datetime import timedelta
 from importlib import import_module
+from pathlib import Path
 
 import numpy as np
 from google.cloud import bigquery
@@ -32,7 +33,9 @@ pilot = import_module("05_bigquery_window_pilot")
 
 def options():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--manifest", default="data/splits/cv4_monthly_manifest.csv")
+    p.add_argument(
+        "--manifest", type=Path, default=Path("data/splits/cv4_monthly_manifest.csv")
+    )
     p.add_argument("--fold", type=int, choices=(1, 2, 3, 4), default=1)
     p.add_argument("--instrument", choices=("mag", "swea"), default="mag")
     p.add_argument("--train-index", type=int, default=1)
