@@ -66,6 +66,10 @@ def args_parser():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--labels", type=Path, default=LABELS)
     p.add_argument("--limit-events", type=int, default=1)
+    p.add_argument(
+        "--instrument", choices=("both", "mag", "swea"), default="both",
+        help="Run both instruments, or only one to avoid unnecessary queries.",
+    )
     p.add_argument("--execute", action="store_true")
     p.add_argument("--max-query-gib", type=float, default=1.0)
     p.add_argument("--max-total-gib", type=float, default=2.0)
@@ -180,12 +184,15 @@ def inspect_swea(rows):
         spectrum = np.full(dims[-1], np.nan, dtype=float)
         valid_counts = np.zeros(dims[-1], dtype=int)
         for b in r.energy_bins:
-            idx = int(b.energy_index)
+            # BigQuery ARRAY<STRUCT> elements are returned as dicts by some
+            # google-cloud-bigquery versions (rather than Row objects).
+            # The mapping protocol works for both dict and bigquery.table.Row.
+            idx = int(b["energy_index"])
             if idx < 0 or idx >= dims[-1]:
                 raise ValueError("Invalid energy bin index")
-            if b.mean_flux is not None:
-                spectrum[idx] = float(b.mean_flux)
-            valid_counts[idx] = int(b.valid_count)
+            if b["mean_flux"] is not None:
+                spectrum[idx] = float(b["mean_flux"])
+            valid_counts[idx] = int(b["valid_count"])
         spectra.append(spectrum)
         counts.append(valid_counts)
         flags[str(r.quality)] += 1
@@ -231,6 +238,9 @@ def main():
             "MAG": MAG_SQL.format(mag=MAG),
             "SWEA": SWEA_SQL.format(swea=SWEA, axes=AXES),
         }
+        if args.instrument != "both":
+            selected = args.instrument.upper()
+            queries = {selected: queries[selected]}
         for name, sql in queries.items():
             estimate = client.query(
                 sql, job_config=query_config(start, end, dry_run=True, max_bytes=1)
