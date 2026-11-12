@@ -174,6 +174,26 @@ python scripts/03_benchmark_cpu.py --threads 6
 
 Run exactly the same command on the office and personal PCs to compare median milliseconds per training step and approximate windows per second; compare the numbers separately for MAG and SWEA. Results are a relative compute benchmark, not trained model performance.
 
+## Cross-validation splits (four folds)
+
+The complete **569 labeled MPB crossings** have been assigned to **four deterministic, month-grouped folds**, balanced across the four original annotation groups. Events in a given UTC calendar month stay in the same fold; **overlapping MAG/SWEA sliding windows must inherit that event's fold**.
+
+| Validation fold | MAG train | MAG validation | SWEA train | SWEA validation |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 418 | 151 | 413 | 146 |
+| 2 | 426 | 143 | 420 | 139 |
+| 3 | 433 | 136 | 424 | 135 |
+| 4 | 430 | 139 | 420 | 139 |
+
+The 10 SWEA-unavailable timestamps identified in BigQuery coverage QC remain included for MAG only. The split metadata and per-fold train/val CSV files live in `data/splits/`. The nearest timestamps assigned to different folds are **278.55 minutes apart**, versus the initial required non-overlap of 70 minutes for 10-minute windows centered within ±30 minutes of the labeled event.
+
+```bash
+# These splits are already committed; running this regenerates the small CSV files:
+python scripts/04_make_cv_splits.py
+```
+
+See [cross-validation design and leakage caveats](docs/cross_validation.md). **No scientific data are downloaded**, and no model has yet been trained. The splitting is by labeled event/month, not by individual overlapping window. Future data loaders will create native-cadence MAG and 30–100 eV SWEA windows in RAM after fold assignment.
+
 ## Status
 
-All four annotation groups are integrated. Timestamp coverage has been measured for 569 MAG and 559 SWEA events. The first BigQuery-only pilot ran successfully for MAG and SWEA without persisting scientific data. The **30–100 eV** SWEA restriction is committed but still awaits a new pilot execution; no model training results are claimed. Next: inspect the actual retained energy channels and implement native-time sliding-window iterators.
+All four annotation groups are integrated. Timestamp coverage has been measured for 569 MAG and 559 SWEA events. The first BigQuery-only pilot ran successfully for MAG and SWEA without persisting scientific data. The **30–100 eV** SWEA restriction has been committed but not yet rechecked in a second pilot. Cross-validation event splits (4 monthly-grouped folds) have been created and versioned; no model training results are claimed. Next: confirm 30–100 eV channel count, implement split-aware native-time sliding-window iterators, and select training-only normalization.
