@@ -25,11 +25,11 @@ Use `--limit-events 2` or `3` for the small optional pilot; to protect against a
 
 **MAG:** returns approximately 601 timestamped vectors `(Bx, By, Bz, |B|)` at the native ~1 s cadence into RAM.
 
-**SWEA:** the original `diff_en_fluxes` arrays are **processed within BigQuery**, using the mapping `energy_index = MOD(flat_array_offset, n_energy)` inherited from the CDF flattening order. The query returns the valid-value angular mean and valid-bin count **per energy and timestamp**, with the energy axis and quality flag. This reduces network payload relative to transferring the full 3D angular-energy flux arrays. BigQuery can still scan the full repeated field internally, so bytes billed may remain significant; always review the dry-run estimate.
+**SWEA:** use the fixed **30–100 eV inclusive energy band**, selected with the true `energy_ev` axis from `maven.swea_svy3d_axes`. This excludes all energy bins outside that range regardless of their index. The original `diff_en_fluxes` arrays are processed **within BigQuery** by grouping array positions via `energy_index = MOD(flat_array_offset, n_energy)`. Only the angular average and valid-bin count of the **selected** energies are returned to Python, along with the energy axis metadata and instrument timestamps. BigQuery can still scan the entire repeated flux field internally; the narrower band primarily reduces network transfer and CNN input size, not necessarily bytes billed.
 
-The angular average is an **exploratory** energy-time representation, not validated omnidirectional flux. No assumption is made yet about the physical interpretation of SWEA `quality` codes; these are reported for review. It may be necessary to replace this reduction with an instrument-aware treatment before training.
+No `quality`-flag exclusion is applied. The exploratory mean includes finite, nonnegative angular flux values at each selected energy and does **not** claim to be a calibrated omnidirectional flux. The energy band is a modeling choice, not proof that all retained data are physically correct.
 
-Printed diagnostics include number of samples, cadence, missing/invalid values, original SWEA dimensions, energy-time dimensions, energy range, and quality-flag distribution.
+Printed diagnostics include temporal sample count and cadence, original SWEA cube dimensions, selected energy-channel count and actual energies, reduced energy-time shape, number of selected energy-time cells with no valid angular measurements, and source-array length consistency.
 
 ## Training design after pilot
 
