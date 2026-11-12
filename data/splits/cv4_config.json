@@ -5,7 +5,7 @@
   "validation_rule": "fold == validation fold",
   "window_minutes": 10,
   "center_range_minutes": 30,
-  "minimum_required_interfold_event_gap_minutes": 70,
+  "minimum_required_interfold_event_gap_minutes": 70.0,
   "observed_minimum_interfold_event_gap_minutes": 278.55,
   "missing_swea_labels": 10,
   "source_month_counts": {
