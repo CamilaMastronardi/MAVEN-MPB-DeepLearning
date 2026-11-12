@@ -1,0 +1,12 @@
+{
+  "split_unit": "UTC calendar month",
+  "folds": 4,
+  "training_rule": "fold != validation fold",
+  "validation_rule": "fold == validation fold",
+  "window_minutes": 10,
+  "center_range_minutes": 30,
+  "minimum_required_interfold_event_gap_minutes": 70,
+  "observed_minimum_interfold_event_gap_minutes": 278.55,
+  "missing_swea_labels": 10,
+  "warning": "Leakage guarantee holds only if ALL fetched signals and any negative-window candidates stay within the declared event supports. For larger neighborhoods, regenerate and recheck. No unseen-year extrapolation is tested."
+}
