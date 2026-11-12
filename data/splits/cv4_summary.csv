@@ -1,0 +1,5 @@
+fold,train_events,val_events,mag_train,mag_val,swea_train,swea_val,val_months,val_Group1,val_Group2,val_Group3,val_Group4
+1,418,151,418,151,413,146,7,27,53,24,47
+2,426,143,426,143,420,139,7,21,58,23,41
+3,433,136,433,136,424,135,5,26,55,14,41
+4,430,139,430,139,420,139,6,34,53,9,43
