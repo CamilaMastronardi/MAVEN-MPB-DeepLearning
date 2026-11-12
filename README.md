@@ -206,6 +206,26 @@ python scripts/05_bigquery_window_pilot.py --fold 1 --subset val --execute
 
 By default the pilot performs **dry-run estimates only**. `--execute` queries at most one selected event by default, checks byte/row caps, generates window statistics in RAM, and **does not save scientific measurement arrays locally**. See [window generation details](docs/window_generation.md). This stage does not assume that low-target windows are verified physical negatives, and does not fit normalization using held-out data.
 
+## Fold-aware normalization and masked minibatches
+
+The first CV fold event produced **3,600 MAG windows (4×601)** and **112 SWEA windows (1×11×19)**, with **zero rejected windows**; the selected SWEA energy axis contains eleven channels within 30–100 eV. The Gaussian target `y>=0.5` occurs in 142 MAG and 4 SWEA windows. These heavily overlapping windows are *not independent events*.
+
+`scripts/native_batches.py` provides train-only per-channel streaming normalization (MAG: z-score; SWEA: `log10(1+flux)` then per-energy z-score), shape-preserving native-time padded batches with time masks, and provisional masked reconstruction / weighted proximity regression losses. **Normalization must be fitted separately for each CV fold on unique training epochs only**, never on held-out measurements. Model convolutions and readout must also handle padded time indices.
+
+A limited, dry-run-first integrated pilot checks two real BigQuery event blocks (one training, one held-out validation) without saving measurements:
+
+```bash
+python -m unittest discover -s tests -v
+
+# Estimate only:
+python scripts/06_fold_preprocessing_pilot.py --fold 1 --instrument mag
+
+# Optional bounded execution:
+python scripts/06_fold_preprocessing_pilot.py --fold 1 --instrument mag --execute
+```
+
+See [normalization and batching workflow](docs/preprocessing_and_batches.md). The two-event integration pilot's normalizer is **not** the final fold-level normalizer, and no CNN has been trained.
+
 ## Status
 
-All four annotation groups are integrated. Timestamp coverage has been measured for 569 MAG and 559 SWEA events. The first BigQuery-only pilot ran successfully for MAG and SWEA without persisting scientific data. The **30–100 eV** SWEA restriction has been committed but not yet rechecked in a second pilot. Cross-validation event splits (4 monthly-grouped folds) have been created and versioned; no model training results are claimed. Next: run the fold-aware MAG/SWEA window pilot, inspect accepted/rejected window counts and observed 30–100 eV channels, then design train-only normalization and conservative negative sampling.
+All four annotation groups are integrated. Timestamp coverage has been measured for 569 MAG and 559 SWEA events. The first BigQuery-only pilot ran successfully for MAG and SWEA without persisting scientific data. The **30–100 eV** SWEA restriction has been committed but not yet rechecked in a second pilot. Cross-validation event splits (4 monthly-grouped folds) have been created and versioned; no model training results are claimed. Next: validate the normalization-and-masked-batch integration pilot, deduplicate overlapping training data blocks, fit fold-wide statistics using only training months, and construct mask-aware CNN architectures with cautious label sampling.
