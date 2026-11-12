@@ -12,7 +12,7 @@ The physical interpretation of each annotation (`onset`, `center`, or another ma
 
 ## Proposed architecture: convolutional autoencoder + center detection
 
-**Inputs:** independent MAG and SWEA windows, each using its instrument's own sampling cadence; raw MAG and SWEA measurements do not need to share one time grid. MAG uses `Bx`, `By`, `Bz`, `|B|`; SWEA uses electron energy-time measurements. Spacecraft position can be retained as metadata.
+**Inputs:** independent MAG and SWEA windows, each using its instrument's own sampling cadence; raw MAG and SWEA measurements do not need to share one time grid. MAG uses `Bx`, `By`, `Bz`, `|B|`; SWEA uses electron energy-time measurements **restricted to 30–100 eV inclusive, using the physical energy axis rather than channel numbers**. Spacecraft position can be retained as metadata.
 
 1. **MAG:** independent 1D convolutional autoencoder, reconstruction decoder, and supervised detection head.
 2. **SWEA:** independent convolutional autoencoder, reconstruction decoder, and supervised detection head.
@@ -140,7 +140,7 @@ The offline timestamp diagnostic found median per-event cadences of **1 s (MAG)*
 
 The updated `scripts/02_bigquery_event_pilot.py` queries one label-centered **10-minute** interval in both instruments. It computes diagnostics in **RAM** and does **not write `.npz`, raw flux files, or other scientific-data copies locally**. Before each query it estimates BigQuery bytes; `--execute` is required to run it.
 
-For SWEA, an exploratory valid-angular-bin energy spectrum is computed **inside BigQuery** and only the reduced energy-time samples are transmitted. This is not yet a physically validated omnidirectional flux; quality flag handling and energy-channel validity require review.
+For SWEA, BigQuery discards electron-energy bins outside **30–100 eV** and computes the exploratory angular mean **inside BigQuery** for the retained channels only. It uses the stored `energy_ev` axis, not assumed energy-channel indices. No `quality`-flag filtering is applied, and this mean should not be called a calibrated omnidirectional flux. The 30–100 eV interval is our chosen modeling input band.
 
 ```bash
 # Dry-run only: estimated BigQuery query cost.
@@ -157,11 +157,11 @@ See [BigQuery-only pilot workflow](docs/bigquery_event_pilot.md). In training, q
 A 600-second window centered at **2014-11-12 13:46:33 UTC** was examined **directly in BigQuery** and analyzed in RAM, without writing any scientific measurements locally.
 
 - **MAG:** 600 samples (4 channels), event median cadence 1.0 s, max gap approximately 1.001 s, zero invalid field values.
-- **SWEA svy3d:** 18 timestamps, **median cadence 32 s** (compared with median 16 s across the previously measured 559 covered labeled events); original cube 6 elevation × 16 azimuth × 64 energy, valid-angle exploratory energy-time summary of shape 18 × 64, energy range 3–4630 eV, no missing valid angular flux for the 1,152 energy-time cells.
-- **SWEA `quality`:** all 18 samples have value `-1`. Its meaning has **not** been established from the archived BigQuery column or original CDF metadata. The signal cannot be designated good or bad on this basis alone. Do not filter `quality == -1` or assert that all 18 measurements pass instrument-specific quality control.
+- **SWEA svy3d (pilot before band restriction):** 18 timestamps, **median cadence 32 s** (compared with median 16 s across the previously measured 559 covered labeled events); original cube 6 elevation × 16 azimuth × 64 energy, provisional full-range energy-time summary of shape 18 × 64, energy range 3–4630 eV, no missing valid angular flux for the 1,152 energy-time cells. The new **30–100 eV-only** query has not yet been executed, so its number of selected energy bins is still to be measured.
+- **SWEA `quality` (historical pilot):** all 18 samples have value `-1`. We are not using that flag as an exclusion criterion; model inputs will be selected by the agreed energy range.
 - **Scientific caution:** do not assume that 600 s always contains 38 SWEA measurements. The native SWEA cadence can vary between events; build variable-time-length inputs or apply an explicitly documented *within-SWEA* padding/masking strategy, preserving instrument-specific cadence and window movement by one native measurement.
 
-Next: investigate `quality`/energy-axis metadata and the SWEA angular aggregation before finalizing the CNN input representation. Keep separate MAG and SWEA score curves and do not synchronize the raw measurements.
+Next: run the 30–100 eV-only SWEA pilot, verify the number of channels in the stored energy axis, then implement sliding-window inputs for each instrument with separate native cadences and detection-score curves.
 
 ## CPU performance benchmark
 
@@ -176,4 +176,4 @@ Run exactly the same command on the office and personal PCs to compare median mi
 
 ## Status
 
-All four annotation groups are integrated. Timestamp coverage has been measured for 569 MAG and 559 SWEA events. The BigQuery-only scientific-data pilot is ready but has **not yet been executed**; no model training results are claimed. Next: inspect in-RAM pilot output, verify SWEA quality/energy aggregation, and implement native-time sliding-window iterators.
+All four annotation groups are integrated. Timestamp coverage has been measured for 569 MAG and 559 SWEA events. The first BigQuery-only pilot ran successfully for MAG and SWEA without persisting scientific data. The **30–100 eV** SWEA restriction is committed but still awaits a new pilot execution; no model training results are claimed. Next: inspect the actual retained energy channels and implement native-time sliding-window iterators.
