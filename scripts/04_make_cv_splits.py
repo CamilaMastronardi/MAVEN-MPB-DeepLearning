@@ -191,7 +191,8 @@ def main() -> None:
 
     extra = ["month_block", "fold", "mag_available", "swea_available"]
     columns = headers + extra
-    save_csv(args.out / "cv4_monthly_manifest.csv", columns, manifest)
+    prefix = f"cv{args.folds}"
+    save_csv(args.out / f"{prefix}_monthly_manifest.csv", columns, manifest)
 
     source_groups = sorted({row["source_group"] for row in rows})
     summary_rows = []
@@ -217,7 +218,7 @@ def main() -> None:
         summary_rows.append(summary_row)
 
     save_csv(
-        args.out / "cv4_summary.csv",
+        args.out / f"{prefix}_summary.csv",
         list(summary_rows[0].keys()),
         summary_rows,
     )
@@ -241,7 +242,7 @@ def main() -> None:
             "No unseen-year extrapolation is tested."
         ),
     }
-    (args.out / "cv4_config.json").write_text(
+    (args.out / f"{prefix}_config.json").write_text(
         json.dumps(config, indent=2) + "\n", encoding="utf-8"
     )
     print(f"Total events: {len(rows)}; distinct monthly blocks: {len(months)}")
