@@ -152,6 +152,17 @@ python scripts/02_bigquery_event_pilot.py --execute
 
 See [BigQuery-only pilot workflow](docs/bigquery_event_pilot.md). In training, query temporal blocks once and form all overlapping one-native-sample-stride windows **within RAM**, rather than running BigQuery for every window.
 
+## First scientific-data pilot result (2026-11-12)
+
+A 600-second window centered at **2014-11-12 13:46:33 UTC** was examined **directly in BigQuery** and analyzed in RAM, without writing any scientific measurements locally.
+
+- **MAG:** 600 samples (4 channels), event median cadence 1.0 s, max gap approximately 1.001 s, zero invalid field values.
+- **SWEA svy3d:** 18 timestamps, **median cadence 32 s** (compared with median 16 s across the previously measured 559 covered labeled events); original cube 6 elevation × 16 azimuth × 64 energy, valid-angle exploratory energy-time summary of shape 18 × 64, energy range 3–4630 eV, no missing valid angular flux for the 1,152 energy-time cells.
+- **SWEA `quality`:** all 18 samples have value `-1`. Its meaning has **not** been established from the archived BigQuery column or original CDF metadata. The signal cannot be designated good or bad on this basis alone. Do not filter `quality == -1` or assert that all 18 measurements pass instrument-specific quality control.
+- **Scientific caution:** do not assume that 600 s always contains 38 SWEA measurements. The native SWEA cadence can vary between events; build variable-time-length inputs or apply an explicitly documented *within-SWEA* padding/masking strategy, preserving instrument-specific cadence and window movement by one native measurement.
+
+Next: investigate `quality`/energy-axis metadata and the SWEA angular aggregation before finalizing the CNN input representation. Keep separate MAG and SWEA score curves and do not synchronize the raw measurements.
+
 ## CPU performance benchmark
 
 The repository includes a **synthetic** CPU training benchmark for two lightweight autoencoders with detection heads: MAG Conv1D `[batch,4,601]` and SWEA Conv2D `[batch,1,64,38]`. It uses PyTorch only, does **not** query BigQuery, and does **not** write measurements or benchmark files to disk.
