@@ -2,7 +2,8 @@
 """Inspect one to three 10-minute MPB windows directly from BigQuery.
 
 Dry-run by default. --execute processes bounded query results in RAM, not files.
-SWEA's angular average is computed remotely in BigQuery per energy/time sample;
+Only SWEA energy channels between 30 and 100 eV (inclusive) are retained.
+The angular average is computed in BigQuery per selected energy/time sample;
 this is an exploratory feature, not calibrated omnidirectional electron flux.
 """
 
@@ -10,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -23,6 +23,8 @@ SWEA = f"{PROJECT}.maven.swea_svy3d"
 AXES = f"{PROJECT}.maven.swea_svy3d_axes"
 LABELS = Path("data/labels/mpb_crossings.csv")
 GIB = 1024 ** 3
+SWEA_ENERGY_MIN_EV = 30.0
+SWEA_ENERGY_MAX_EV = 100.0
 
 MAG_SQL = """
 SELECT datetime_utc, bx_ss_nt, by_ss_nt, bz_ss_nt, b_total_nt, range_b
@@ -32,10 +34,12 @@ WHERE DATE(datetime_utc) IN UNNEST(@days)
 ORDER BY datetime_utc
 """
 
-# Angular bins stay on the BigQuery server. The client receives only one
-# flux average and count per energy, for each SWEA epoch.
+# Angular bins stay in BigQuery. The client receives one angular-mean flux
+# and valid-bin count only for 30–100 eV channels at each SWEA epoch.
+# Using the physical energy axis (rather than hardcoded channel indices)
+# handles logarithmic channel placement and possible grid changes.
 SWEA_SQL = """
-SELECT d.datetime_utc, d.quality, d.source_file,
+SELECT d.datetime_utc, d.source_file,
        a.energy_ev, a.n_elev, a.n_azim, a.n_energy,
        ARRAY_LENGTH(d.diff_en_fluxes) AS original_flux_count,
        ARRAY(
@@ -51,6 +55,8 @@ SELECT d.datetime_utc, d.quality, d.source_file,
              AND NOT IS_INF(flux) AND flux >= 0
            ) AS valid_count
          FROM UNNEST(d.diff_en_fluxes) AS flux WITH OFFSET AS offset_index
+         WHERE a.energy_ev[SAFE_OFFSET(MOD(offset_index, a.n_energy))]
+               BETWEEN @energy_min_ev AND @energy_max_ev
          GROUP BY energy_index
          ORDER BY energy_index
        ) AS energy_bins
@@ -106,6 +112,12 @@ def query_config(start, end, *, dry_run, max_bytes):
             ),
             bigquery.ScalarQueryParameter("start", "TIMESTAMP", start),
             bigquery.ScalarQueryParameter("end", "TIMESTAMP", end),
+            bigquery.ScalarQueryParameter(
+                "energy_min_ev", "FLOAT64", SWEA_ENERGY_MIN_EV
+            ),
+            bigquery.ScalarQueryParameter(
+                "energy_max_ev", "FLOAT64", SWEA_ENERGY_MAX_EV
+            ),
         ],
     }
     # Never send maximum_bytes_billed=None to BigQuery in dry-run mode.
@@ -163,7 +175,8 @@ def inspect_swea(rows):
         return
     shapes = set()
     reference_energy = None
-    flags = Counter()
+    selected_energy_count = None
+    selected_channels = None
     spectra = []
     counts = []
     shape_mismatches = 0
@@ -177,25 +190,34 @@ def inspect_swea(rows):
             raise ValueError("SWEA energy axis has wrong dimension")
         if reference_energy is None:
             reference_energy = energy
+            selected_channels = np.flatnonzero(
+                (energy >= SWEA_ENERGY_MIN_EV) &
+                (energy <= SWEA_ENERGY_MAX_EV)
+            )
+            selected_energy_count = len(selected_channels)
+            if selected_energy_count == 0:
+                raise ValueError("No SWEA energy channels in the 30–100 eV band")
         elif not np.allclose(
             energy, reference_energy, rtol=1e-6, atol=1e-6
         ):
             raise ValueError("SWEA energy axis changes between samples")
-        spectrum = np.full(dims[-1], np.nan, dtype=float)
-        valid_counts = np.zeros(dims[-1], dtype=int)
+
+        spectrum = np.full(selected_energy_count, np.nan, dtype=float)
+        valid_counts = np.zeros(selected_energy_count, dtype=int)
+        channel_to_column = {
+            int(channel): col for col, channel in enumerate(selected_channels)
+        }
         for b in r.energy_bins:
-            # BigQuery ARRAY<STRUCT> elements are returned as dicts by some
-            # google-cloud-bigquery versions (rather than Row objects).
-            # The mapping protocol works for both dict and bigquery.table.Row.
-            idx = int(b["energy_index"])
-            if idx < 0 or idx >= dims[-1]:
-                raise ValueError("Invalid energy bin index")
+            # BigQuery ARRAY<STRUCT> items are mapping-like (often dicts).
+            original_index = int(b["energy_index"])
+            if original_index not in channel_to_column:
+                raise ValueError("BigQuery returned a SWEA energy outside 30–100 eV")
+            col = channel_to_column[original_index]
             if b["mean_flux"] is not None:
-                spectrum[idx] = float(b["mean_flux"])
-            valid_counts[idx] = int(b["valid_count"])
+                spectrum[col] = float(b["mean_flux"])
+            valid_counts[col] = int(b["valid_count"])
         spectra.append(spectrum)
         counts.append(valid_counts)
-        flags[str(r.quality)] += 1
 
     if len(shapes) != 1:
         raise ValueError(f"Inconsistent SWEA dimensions: {sorted(shapes)}")
@@ -210,13 +232,19 @@ def inspect_swea(rows):
         f"  SWEA median dt: {med} s, max dt: {maximum} s, "
         f"duplicate timestamps: {duplicates}"
     )
+    selected_energies = reference_energy[selected_channels]
     print(
-        f"  SWEA energy range: {reference_energy.min():.3g} .. "
-        f"{reference_energy.max():.3g} eV, bad-length frames: {shape_mismatches}, "
-        f"energy-time bins with no valid angular flux: "
+        f"  SWEA selected energy band: {SWEA_ENERGY_MIN_EV:g}–"
+        f"{SWEA_ENERGY_MAX_EV:g} eV, "
+        f"{selected_energy_count} channels; actual channel energies: "
+        f"{np.array2string(selected_energies, precision=2, separator=', ')} eV"
+    )
+    print(
+        f"  SWEA original flux-length mismatches: {shape_mismatches}; "
+        f"selected energy-time cells with no valid angular flux: "
         f"{int(np.count_nonzero(count_matrix == 0))}/{count_matrix.size}"
     )
-    print(f"  SWEA quality flag counts: {dict(flags)}")
+    print("  No SWEA quality-flag filtering applied.")
     print("  Angular mean is exploratory; not a validated omnidirectional flux.")
 
 
