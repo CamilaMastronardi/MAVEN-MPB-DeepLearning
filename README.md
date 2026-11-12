@@ -165,7 +165,7 @@ Next: run the 30–100 eV-only SWEA pilot, verify the number of channels in the 
 
 ## CPU performance benchmark
 
-The repository includes a **synthetic** CPU training benchmark for two lightweight autoencoders with detection heads: MAG Conv1D `[batch,4,601]` and SWEA Conv2D `[batch,1,64,38]`. It uses PyTorch only, does **not** query BigQuery, and does **not** write measurements or benchmark files to disk.
+The repository includes a **synthetic** CPU training benchmark for two lightweight autoencoders with detection heads: MAG Conv1D `[batch,4,601]` and SWEA Conv2D `[batch,1,N_E,N_t]`. The old benchmark used all 64 energies and 38 times as an illustrative shape; **the actual input now uses only channels between 30 and 100 eV**. After the updated SWEA pilot reports the retained channel count, pass it using `--swea-energy-bins N_E`; for the first event with 32-second cadence, use `--swea-time-samples 18`. It uses PyTorch only, does **not** query BigQuery, and does **not** write measurements or benchmark files to disk.
 
 ```bash
 python scripts/03_benchmark_cpu.py --threads 3
