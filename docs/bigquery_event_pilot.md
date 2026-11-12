@@ -16,6 +16,9 @@ python scripts/02_bigquery_event_pilot.py
 
 # If the estimate is acceptable, process one event in RAM and print diagnostics:
 python scripts/02_bigquery_event_pilot.py --execute
+
+# Process only SWEA, e.g. after MAG has already completed successfully:
+python scripts/02_bigquery_event_pilot.py --instrument swea --execute
 ```
 
 Use `--limit-events 2` or `3` for the small optional pilot; to protect against accidental scans, only one to three events are supported. BigQuery partition pruning by event date and the ±300-second timestamp interval are mandatory. The pilot has query and total byte limits, and sends `maximum_bytes_billed` only on execution (never `None` on a dry run).
