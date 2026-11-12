@@ -139,7 +139,9 @@ def minimum_interfold_gap(rows: list[dict], assignment: dict) -> float:
 
 def save_csv(path: Path, columns: list[str], data: list[dict]) -> None:
     with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=columns, extrasaction="ignore")
+        writer = csv.DictWriter(
+            handle, fieldnames=columns, extrasaction="ignore", lineterminator="\n"
+        )
         writer.writeheader()
         writer.writerows(data)
 
