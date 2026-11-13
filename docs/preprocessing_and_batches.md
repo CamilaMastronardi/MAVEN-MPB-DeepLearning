@@ -77,6 +77,10 @@ python scripts/4_preprocessing/4b_fold_preprocessing_pilot.py --fold 1 --instrum
 
 Defaults: dry-run unless `--execute`; capped at **1 GiB per query and 1 GiB total**, 25,000 rows per query; the first eligible train/validation event. It prints source fold IDs, query cost estimates, training-only channel statistics, actual padded batch shapes, masks and baseline loss values. No raw data or arrays are written to disk.
 
+## Full-fold statistics script
+
+The single-event MAG/SWEA integration pilots have both succeeded. For full training-fold statistics, see [Step 4c: resumable fold-wide normalization](full_fold_normalization.md). Only the final JSON after all training UTC days are processed should be used for model training.
+
 ## Before full training
 
 1. Merge overlapping training event blocks in each month to avoid repeated raw epochs in normalization and reduce BigQuery scans.
