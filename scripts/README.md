@@ -23,6 +23,7 @@ que sus pilotos.
 
 - `4a_native_batches.py`: normalización train-only, logaritmo de SWEA, padding y máscaras.
 - `4b_fold_preprocessing_pilot.py`: prueba integrada con un evento train y uno validation.
+- `4c_fit_fold_normalizers.py`: ajusta estadísticas del fold completo por fechas UTC, sin muestras repetidas y con checkpoints para continuar tandas.
 
 Las pruebas offline correspondientes están en `tests/test_3a_windowing.py` y
 `tests/test_4a_native_batches.py`. Conservan `test_` al principio para permitir
@@ -48,6 +49,10 @@ python scripts/3_windowing/3b_bigquery_window_pilot.py --fold 1 --subset val --e
 # Piloto de normalización: MAG y SWEA.
 python scripts/4_preprocessing/4b_fold_preprocessing_pilot.py --fold 1 --instrument mag
 python scripts/4_preprocessing/4b_fold_preprocessing_pilot.py --fold 1 --instrument swea
+
+# Normalización de un fold entero, 3 fechas por tanda (primero dry-run):
+python scripts/4_preprocessing/4c_fit_fold_normalizers.py --fold 1 --instrument mag
+python scripts/4_preprocessing/4c_fit_fold_normalizers.py --fold 1 --instrument swea
 ```
 
 Los comandos con BigQuery hacen estimaciones por defecto. Sólo `--execute`
