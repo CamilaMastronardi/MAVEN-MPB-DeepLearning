@@ -101,13 +101,19 @@ class FoldNormalizerPlanTests(unittest.TestCase):
             n, "signature", {"2018-01-01"}, 0, None, "MAG", 1
         )
         restored = fit.restore_normalizer(state, "MAG", 1)
+        # Before freezing, reject held-out validation observations explicitly.
+        with self.assertRaises(ValueError):
+            restored.update(a, source_fold=1)
+        # The invalid update must not alter accumulated training statistics.
+        self.assertEqual(restored.count, len(a))
         restored.update(b, source_fold=3)
         restored.freeze()
         np.testing.assert_allclose(restored.mean, np.vstack([a,b]).mean(0))
         np.testing.assert_allclose(restored.scale, np.vstack([a,b]).std(0))
         self.assertEqual(restored.count, 4)
-        with self.assertRaises(ValueError):
-            restored.update(a, source_fold=1)
+        # After freezing, every attempt to refit is rejected.
+        with self.assertRaises(RuntimeError):
+            restored.update(a, source_fold=2)
 
 
 if __name__ == "__main__":
