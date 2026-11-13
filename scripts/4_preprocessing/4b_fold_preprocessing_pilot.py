@@ -14,6 +14,7 @@ fold statistics, no CNN is trained, and negative labels remain provisional.
 from __future__ import annotations
 
 import argparse
+import sys
 from datetime import timedelta
 from importlib import import_module
 from pathlib import Path
@@ -21,14 +22,22 @@ from pathlib import Path
 import numpy as np
 from google.cloud import bigquery
 
-from native_batches import (
-    FoldChannelNormalizer, collate_native_windows, masked_reconstruction_mse,
-    weighted_proximity_mse,
-)
-from windowing import WindowStats, iter_native_windows
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-bq = import_module("02_bigquery_event_pilot")
-pilot = import_module("05_bigquery_window_pilot")
+batching = import_module("scripts.4_preprocessing.4a_native_batches")
+FoldChannelNormalizer = batching.FoldChannelNormalizer
+collate_native_windows = batching.collate_native_windows
+masked_reconstruction_mse = batching.masked_reconstruction_mse
+weighted_proximity_mse = batching.weighted_proximity_mse
+
+windowing = import_module("scripts.3_windowing.3a_windowing")
+WindowStats = windowing.WindowStats
+iter_native_windows = windowing.iter_native_windows
+
+bq = import_module("scripts.1_bigquery.1c_bigquery_event_pilot")
+pilot = import_module("scripts.3_windowing.3b_bigquery_window_pilot")
 
 
 def options():

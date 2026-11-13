@@ -20,7 +20,7 @@ From the repository root, with the Python 3.11 virtual environment activated:
 ```bash
 git pull origin main
 uv pip install -r requirements.txt
-python scripts/01_bigquery_crossing_coverage.py --metadata-only
+python scripts/1_bigquery/1a_bigquery_crossing_coverage.py --metadata-only
 ```
 
 The metadata command prints BigQuery schemas and partitioning without scanning table rows.
@@ -28,26 +28,26 @@ The metadata command prints BigQuery schemas and partitioning without scanning t
 Start with a **dry-run**, which is the default:
 
 ```bash
-python scripts/01_bigquery_crossing_coverage.py --limit-events 5
+python scripts/1_bigquery/1a_bigquery_crossing_coverage.py --limit-events 5
 ```
 
 This estimates processed bytes and does **not** execute the data query. If the estimates are acceptable, run the same five-event pilot:
 
 ```bash
-python scripts/01_bigquery_crossing_coverage.py --limit-events 5 --execute
+python scripts/1_bigquery/1a_bigquery_crossing_coverage.py --limit-events 5 --execute
 ```
 
 Then assess all labels, again estimating cost before executing:
 
 ```bash
-python scripts/01_bigquery_crossing_coverage.py
-python scripts/01_bigquery_crossing_coverage.py --execute
+python scripts/1_bigquery/1a_bigquery_crossing_coverage.py
+python scripts/1_bigquery/1a_bigquery_crossing_coverage.py --execute
 ```
 
 The script refuses to run if a table is not partitioned by `datetime_utc`. The query uses a **date-partition filter**, reads only `datetime_utc`, limits each event to ±300 seconds, estimates bytes before execution, and enforces default caps of 1 GiB per query and 5 GiB total estimated bytes. If the estimate exceeds either cap, review the estimate before choosing explicit higher values:
 
 ```bash
-python scripts/01_bigquery_crossing_coverage.py --max-billed-gib 2 --max-total-gib 8
+python scripts/1_bigquery/1a_bigquery_crossing_coverage.py --max-billed-gib 2 --max-total-gib 8
 ```
 
 The previous command is still a dry run without `--execute`.

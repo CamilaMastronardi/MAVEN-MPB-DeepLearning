@@ -49,24 +49,24 @@ git pull origin main
 python -m unittest discover -s tests -v
 
 # Dry run for the FIRST event in held-out fold 1.
-python scripts/05_bigquery_window_pilot.py --fold 1 --subset val
+python scripts/3_windowing/3b_bigquery_window_pilot.py --fold 1 --subset val
 
 # Execute the 2 bounded MAG/SWEA queries for that one event.
 # No raw data or derived arrays are saved to disk.
-python scripts/05_bigquery_window_pilot.py --fold 1 --subset val --execute
+python scripts/3_windowing/3b_bigquery_window_pilot.py --fold 1 --subset val --execute
 ```
 
 For a cheaper MAG-only run:
 
 ```bash
-python scripts/05_bigquery_window_pilot.py --instrument mag --fold 1 --subset val --execute
+python scripts/3_windowing/3b_bigquery_window_pilot.py --instrument mag --fold 1 --subset val --execute
 ```
 
 To inspect SWEA only, or use training events:
 
 ```bash
-python scripts/05_bigquery_window_pilot.py --instrument swea --fold 1 --subset val --execute
-python scripts/05_bigquery_window_pilot.py --instrument swea --fold 1 --subset train --execute
+python scripts/3_windowing/3b_bigquery_window_pilot.py --instrument swea --fold 1 --subset val --execute
+python scripts/3_windowing/3b_bigquery_window_pilot.py --instrument swea --fold 1 --subset train --execute
 ```
 
 Defaults are dry-run only, **one event maximum unless explicitly selected**, `--max-query-gib 1`, `--max-total-gib 2`, `--max-returned-rows 25000`. Use `--event-index N` to choose an event from the sorted fold/subset list, and `--limit-events N` up to three to inspect consecutive events. Query estimates can remain similar even after selecting only 30–100 eV because BigQuery scans the full repeated flux array internally.

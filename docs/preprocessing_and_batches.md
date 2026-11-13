@@ -4,7 +4,7 @@ This stage prepares inputs for the two CNN autoencoders. **No model has been tra
 
 ## Observed first event
 
-The real-data `05_bigquery_window_pilot.py` produced:
+The real-data `3b_bigquery_window_pilot.py` produced:
 
 | | MAG | SWEA (30–100 eV) |
 |---|---:|---:|
@@ -28,7 +28,7 @@ Apply separate normalization for each `(held_out_fold, instrument)` pair, using 
 
 Fit the normalizer on **unique raw measurement epochs** (training blocks with overlap deduplicated), **not on every overlapping training window**; otherwise samples repeated across many overlapping windows would distort the statistics. Implement this deduplication before fitting a full-fold scaler.
 
-The `FoldChannelNormalizer` implementation in `scripts/native_batches.py` *requires an explicit source fold* when updating statistics, and rejects a source fold matching the held-out fold. Once frozen, the same transformation can be applied to either training or validation samples.
+The `FoldChannelNormalizer` implementation in `scripts/4_preprocessing/4a_4a_native_batches.py` *requires an explicit source fold* when updating statistics, and rejects a source fold matching the held-out fold. Once frozen, the same transformation can be applied to either training or validation samples.
 
 The transformation is a provisional default, not a validated choice for every instrument/channel.
 
@@ -61,18 +61,18 @@ The new unit tests cover train/validation separation of scaler statistics, MAG z
 
 ## Real-data integration pilot
 
-`scripts/06_fold_preprocessing_pilot.py` executes a **small, dry-run-first** demonstration using one training event and one validation event from the selected fold. It fits provisional statistics from **one training event only**, then applies them to the held-out validation event. This is for testing integration, **not** a final fold normalizer, and no model weights are trained.
+`scripts/4_preprocessing/4b_fold_preprocessing_pilot.py` executes a **small, dry-run-first** demonstration using one training event and one validation event from the selected fold. It fits provisional statistics from **one training event only**, then applies them to the held-out validation event. This is for testing integration, **not** a final fold normalizer, and no model weights are trained.
 
 ```bash
 # Estimate two 70-minute MAG queries; no measurement transfer.
-python scripts/06_fold_preprocessing_pilot.py --fold 1 --instrument mag
+python scripts/4_preprocessing/4b_fold_preprocessing_pilot.py --fold 1 --instrument mag
 
 # Run once the estimate is acceptable.
-python scripts/06_fold_preprocessing_pilot.py --fold 1 --instrument mag --execute
+python scripts/4_preprocessing/4b_fold_preprocessing_pilot.py --fold 1 --instrument mag --execute
 
 # SWEA (two 70-minute blocks, energy range 30–100 eV):
-python scripts/06_fold_preprocessing_pilot.py --fold 1 --instrument swea
-python scripts/06_fold_preprocessing_pilot.py --fold 1 --instrument swea --execute
+python scripts/4_preprocessing/4b_fold_preprocessing_pilot.py --fold 1 --instrument swea
+python scripts/4_preprocessing/4b_fold_preprocessing_pilot.py --fold 1 --instrument swea --execute
 ```
 
 Defaults: dry-run unless `--execute`; capped at **1 GiB per query and 1 GiB total**, 25,000 rows per query; the first eligible train/validation event. It prints source fold IDs, query cost estimates, training-only channel statistics, actual padded batch shapes, masks and baseline loss values. No raw data or arrays are written to disk.

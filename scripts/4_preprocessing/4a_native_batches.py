@@ -18,12 +18,19 @@ Important:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from importlib import import_module
+from pathlib import Path
 from typing import Literal, Sequence
+import sys
 
 import numpy as np
 import torch
 
-from windowing import Window
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+Window = import_module("scripts.3_windowing.3a_windowing").Window
 
 Instrument = Literal["MAG", "SWEA"]
 

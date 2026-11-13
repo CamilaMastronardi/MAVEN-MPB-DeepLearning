@@ -8,12 +8,16 @@ from __future__ import annotations
 
 import sys
 import unittest
+from importlib import import_module
 from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from windowing import WindowStats, iter_native_windows, nearest_label_offset_s
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+windowing = import_module("scripts.3_windowing.3a_windowing")
+WindowStats = windowing.WindowStats
+iter_native_windows = windowing.iter_native_windows
+nearest_label_offset_s = windowing.nearest_label_offset_s
 
 
 class NativeWindowTests(unittest.TestCase):

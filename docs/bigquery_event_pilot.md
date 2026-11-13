@@ -6,19 +6,19 @@ A local Python model cannot read remote BigQuery data without transmitting some 
 
 ## Pilot
 
-`scripts/02_bigquery_event_pilot.py` examines a single labeled 600-second window for MAG and SWEA. Default: **dry-run only**. No raw observations are queried unless `--execute` is specified.
+`scripts/1_bigquery/1c_bigquery_event_pilot.py` examines a single labeled 600-second window for MAG and SWEA. Default: **dry-run only**. No raw observations are queried unless `--execute` is specified.
 
 ```bash
 git pull origin main
 
 # Estimate BigQuery bytes; no scientific data transferred:
-python scripts/02_bigquery_event_pilot.py
+python scripts/1_bigquery/1c_bigquery_event_pilot.py
 
 # If the estimate is acceptable, process one event in RAM and print diagnostics:
-python scripts/02_bigquery_event_pilot.py --execute
+python scripts/1_bigquery/1c_bigquery_event_pilot.py --execute
 
 # Process only SWEA, e.g. after MAG has already completed successfully:
-python scripts/02_bigquery_event_pilot.py --instrument swea --execute
+python scripts/1_bigquery/1c_bigquery_event_pilot.py --instrument swea --execute
 ```
 
 Use `--limit-events 2` or `3` for the small optional pilot; to protect against accidental scans, only one to three events are supported. BigQuery partition pruning by event date and the ±300-second timestamp interval are mandatory. The pilot has query and total byte limits, and sends `maximum_bytes_billed` only on execution (never `None` on a dry run).

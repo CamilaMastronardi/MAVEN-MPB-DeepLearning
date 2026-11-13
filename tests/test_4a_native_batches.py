@@ -4,17 +4,20 @@ from __future__ import annotations
 
 import sys
 import unittest
+from importlib import import_module
 from pathlib import Path
 
 import numpy as np
 import torch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from native_batches import (
-    FoldChannelNormalizer, collate_native_windows, feature_transform,
-    masked_reconstruction_mse, weighted_proximity_mse,
-)
-from windowing import Window
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+batching = import_module("scripts.4_preprocessing.4a_native_batches")
+FoldChannelNormalizer = batching.FoldChannelNormalizer
+collate_native_windows = batching.collate_native_windows
+feature_transform = batching.feature_transform
+masked_reconstruction_mse = batching.masked_reconstruction_mse
+weighted_proximity_mse = batching.weighted_proximity_mse
+Window = import_module("scripts.3_windowing.3a_windowing").Window
 
 
 def example_window(values: np.ndarray, *, score: float = 0.5) -> Window:

@@ -39,13 +39,13 @@ The closest crossing timestamps assigned to different folds are separated by app
 - `data/splits/cv4_summary.csv`: train/validation counts per fold and source group.
 - `data/splits/cv4_config.json`: split algorithm context and temporal audit.
 - `data/splits/fold_01_train.csv` and `fold_01_val.csv` (similarly for folds 02–04): direct inputs for the eventual MAG/SWEA data loaders.
-- `scripts/04_make_cv_splits.py`: regenerates all these small files from the versioned annotations. It does **not** connect to BigQuery or download MAVEN measurements.
+- `scripts/2_cross_validation/2a_make_cv_splits.py`: regenerates all these small files from the versioned annotations. It does **not** connect to BigQuery or download MAVEN measurements.
 
 On your personal PC, after `git pull origin main`:
 
 ```bash
 # Already committed, so this rerun is optional:
-python scripts/04_make_cv_splits.py
+python scripts/2_cross_validation/2a_make_cv_splits.py
 ```
 
 To load the event lists in Python:

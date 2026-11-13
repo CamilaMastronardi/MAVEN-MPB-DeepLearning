@@ -73,7 +73,12 @@ src/
   detection/      # Encoder, decoder and sliding-window detection
   localization/   # Reserved for further localization experiments
   evaluation/     # Timing metrics and latent-space analysis
-scripts/          # Reproducible command-line entry points
+scripts/
+   1_bigquery/         # 1a–1c: BigQuery coverage and event inspection
+   2_cross_validation/ # 2a: source-aware temporal folds
+   3_windowing/        # 3a–3b: native sliding windows and pilot
+   4_preprocessing/    # 4a–4b: normalization, batches and pilot
+tests/             # Offline tests (test_3a_*, test_4a_*)
 models/           # Model weights (ignored)
 results/
   figures/        # Plots (ignored)
@@ -95,21 +100,21 @@ Dependencies are provisional and will be pinned after the environment and first 
 
 ## BigQuery coverage diagnostic
 
-A first diagnostic script is available at `scripts/01_bigquery_crossing_coverage.py`. It evaluates how many of the 569 labeled crossings have timestamp coverage for a **10-minute window** centered at the MPB label, treating MAG and SWEA independently with a **one-native-sample window stride** planned for training and inference.
+A first diagnostic script is available at `scripts/1_bigquery/1a_bigquery_crossing_coverage.py`. It evaluates how many of the 569 labeled crossings have timestamp coverage for a **10-minute window** centered at the MPB label, treating MAG and SWEA independently with a **one-native-sample window stride** planned for training and inference.
 
 It only scans `datetime_utc` for relevant date partitions, defaults to **dry-run estimates**, and does not download complete magnetic-field or electron-flux time series.
 
 ```bash
 # Check actual schemas and partitioning (metadata only).
-python scripts/01_bigquery_crossing_coverage.py --metadata-only
+python scripts/1_bigquery/1a_bigquery_crossing_coverage.py --metadata-only
 
 # Pilot: estimate cost for five events, then query those events.
-python scripts/01_bigquery_crossing_coverage.py --limit-events 5
-python scripts/01_bigquery_crossing_coverage.py --limit-events 5 --execute
+python scripts/1_bigquery/1a_bigquery_crossing_coverage.py --limit-events 5
+python scripts/1_bigquery/1a_bigquery_crossing_coverage.py --limit-events 5 --execute
 
 # All 569 labels: estimate first, execute second.
-python scripts/01_bigquery_crossing_coverage.py
-python scripts/01_bigquery_crossing_coverage.py --execute
+python scripts/1_bigquery/1a_bigquery_crossing_coverage.py
+python scripts/1_bigquery/1a_bigquery_crossing_coverage.py --execute
 ```
 
 See [coverage workflow](docs/bigquery_coverage.md) for safety limits, outputs, interpretation and next steps.
@@ -129,7 +134,7 @@ These figures refer **only to temporal coverage within ±300 s** around the labe
 A new **offline** script summarizes the two saved CSVs without charging BigQuery:
 
 ```bash
-python scripts/01b_analyze_crossing_coverage.py
+python scripts/1_bigquery/1b_analyze_crossing_coverage.py
 ```
 
 It reports the missing SWEA events and per-instrument cadence distributions; results are saved under `results/metrics/coverage_analysis/`. The output will guide targeted, dry-run-costed scientific-data extraction.
@@ -138,16 +143,16 @@ It reports the missing SWEA events and per-instrument cadence distributions; res
 
 The offline timestamp diagnostic found median per-event cadences of **1 s (MAG)** and **16 s (SWEA)**. To avoid filling the local computer with MAVEN observations, scientific measurements remain **only in BigQuery**.
 
-The updated `scripts/02_bigquery_event_pilot.py` queries one label-centered **10-minute** interval in both instruments. It computes diagnostics in **RAM** and does **not write `.npz`, raw flux files, or other scientific-data copies locally**. Before each query it estimates BigQuery bytes; `--execute` is required to run it.
+The updated `scripts/1_bigquery/1c_bigquery_event_pilot.py` queries one label-centered **10-minute** interval in both instruments. It computes diagnostics in **RAM** and does **not write `.npz`, raw flux files, or other scientific-data copies locally**. Before each query it estimates BigQuery bytes; `--execute` is required to run it.
 
 For SWEA, BigQuery discards electron-energy bins outside **30–100 eV** and computes the exploratory angular mean **inside BigQuery** for the retained channels only. It uses the stored `energy_ev` axis, not assumed energy-channel indices. No `quality`-flag filtering is applied, and this mean should not be called a calibrated omnidirectional flux. The 30–100 eV interval is our chosen modeling input band.
 
 ```bash
 # Dry-run only: estimated BigQuery query cost.
-python scripts/02_bigquery_event_pilot.py
+python scripts/1_bigquery/1c_bigquery_event_pilot.py
 
 # If the estimate is acceptable: print one-event MAG/SWEA diagnostics.
-python scripts/02_bigquery_event_pilot.py --execute
+python scripts/1_bigquery/1c_bigquery_event_pilot.py --execute
 ```
 
 See [BigQuery-only pilot workflow](docs/bigquery_event_pilot.md). In training, query temporal blocks once and form all overlapping one-native-sample-stride windows **within RAM**, rather than running BigQuery for every window.
@@ -162,17 +167,6 @@ A 600-second window centered at **2014-11-12 13:46:33 UTC** was examined **direc
 - **Scientific caution:** do not assume that 600 s always contains 38 SWEA measurements. The native SWEA cadence can vary between events; build variable-time-length inputs or apply an explicitly documented *within-SWEA* padding/masking strategy, preserving instrument-specific cadence and window movement by one native measurement.
 
 Next: run the 30–100 eV-only SWEA pilot, verify the number of channels in the stored energy axis, then implement sliding-window inputs for each instrument with separate native cadences and detection-score curves.
-
-## CPU performance benchmark
-
-The repository includes a **synthetic** CPU training benchmark for two lightweight autoencoders with detection heads: MAG Conv1D `[batch,4,601]` and SWEA Conv2D `[batch,1,N_E,N_t]`. The old benchmark used all 64 energies and 38 times as an illustrative shape; **the actual input now uses only channels between 30 and 100 eV**. After the updated SWEA pilot reports the retained channel count, pass it using `--swea-energy-bins N_E`; for the first event with 32-second cadence, use `--swea-time-samples 18`. It uses PyTorch only, does **not** query BigQuery, and does **not** write measurements or benchmark files to disk.
-
-```bash
-python scripts/03_benchmark_cpu.py --threads 3
-python scripts/03_benchmark_cpu.py --threads 6
-```
-
-Run exactly the same command on the office and personal PCs to compare median milliseconds per training step and approximate windows per second; compare the numbers separately for MAG and SWEA. Results are a relative compute benchmark, not trained model performance.
 
 ## Cross-validation splits (four folds)
 
@@ -189,19 +183,19 @@ The 10 SWEA-unavailable timestamps identified in BigQuery coverage QC remain inc
 
 ```bash
 # These splits are already committed; running this regenerates the small CSV files:
-python scripts/04_make_cv_splits.py
+python scripts/2_cross_validation/2a_make_cv_splits.py
 ```
 
 See [cross-validation design and leakage caveats](docs/cross_validation.md). **No scientific data are downloaded**, and no model has yet been trained. The splitting is by labeled event/month, not by individual overlapping window. Future data loaders will create native-cadence MAG and 30–100 eV SWEA windows in RAM after fold assignment.
 
 ## Native-cadence sliding-window pilot (MAG and SWEA)
 
-The split-aware window generator is in `scripts/windowing.py`, with a BigQuery-to-RAM pilot in `scripts/05_bigquery_window_pilot.py`. For a selected CV fold/event, it retrieves each instrument's **70-minute** block once (window centers within ±30 min of the labeled MPB, with ±5 min support) and yields **600-second windows, one native sample apart**. It rejects missing-edge, large-gap, and nonfinite windows; retains native MAG/SWEA cadences and SWEA energy channels in **30–100 eV**; creates a Gaussian target from the nearest *known* MPB annotation in the current training or validation subset.
+The split-aware window generator is in `scripts/3_windowing/3a_3a_windowing.py`, with a BigQuery-to-RAM pilot in `scripts/3_windowing/3b_bigquery_window_pilot.py`. For a selected CV fold/event, it retrieves each instrument's **70-minute** block once (window centers within ±30 min of the labeled MPB, with ±5 min support) and yields **600-second windows, one native sample apart**. It rejects missing-edge, large-gap, and nonfinite windows; retains native MAG/SWEA cadences and SWEA energy channels in **30–100 eV**; creates a Gaussian target from the nearest *known* MPB annotation in the current training or validation subset.
 
 ```bash
 python -m unittest discover -s tests -v
-python scripts/05_bigquery_window_pilot.py --fold 1 --subset val
-python scripts/05_bigquery_window_pilot.py --fold 1 --subset val --execute
+python scripts/3_windowing/3b_bigquery_window_pilot.py --fold 1 --subset val
+python scripts/3_windowing/3b_bigquery_window_pilot.py --fold 1 --subset val --execute
 ```
 
 By default the pilot performs **dry-run estimates only**. `--execute` queries at most one selected event by default, checks byte/row caps, generates window statistics in RAM, and **does not save scientific measurement arrays locally**. See [window generation details](docs/window_generation.md). This stage does not assume that low-target windows are verified physical negatives, and does not fit normalization using held-out data.
@@ -210,7 +204,7 @@ By default the pilot performs **dry-run estimates only**. `--execute` queries at
 
 The first CV fold event produced **3,600 MAG windows (4×601)** and **112 SWEA windows (1×11×19)**, with **zero rejected windows**; the selected SWEA energy axis contains eleven channels within 30–100 eV. The Gaussian target `y>=0.5` occurs in 142 MAG and 4 SWEA windows. These heavily overlapping windows are *not independent events*.
 
-`scripts/native_batches.py` provides train-only per-channel streaming normalization (MAG: z-score; SWEA: `log10(1+flux)` then per-energy z-score), shape-preserving native-time padded batches with time masks, and provisional masked reconstruction / weighted proximity regression losses. **Normalization must be fitted separately for each CV fold on unique training epochs only**, never on held-out measurements. Model convolutions and readout must also handle padded time indices.
+`scripts/4_preprocessing/4a_4a_native_batches.py` provides train-only per-channel streaming normalization (MAG: z-score; SWEA: `log10(1+flux)` then per-energy z-score), shape-preserving native-time padded batches with time masks, and provisional masked reconstruction / weighted proximity regression losses. **Normalization must be fitted separately for each CV fold on unique training epochs only**, never on held-out measurements. Model convolutions and readout must also handle padded time indices.
 
 A limited, dry-run-first integrated pilot checks two real BigQuery event blocks (one training, one held-out validation) without saving measurements:
 
@@ -218,10 +212,10 @@ A limited, dry-run-first integrated pilot checks two real BigQuery event blocks 
 python -m unittest discover -s tests -v
 
 # Estimate only:
-python scripts/06_fold_preprocessing_pilot.py --fold 1 --instrument mag
+python scripts/4_preprocessing/4b_fold_preprocessing_pilot.py --fold 1 --instrument mag
 
 # Optional bounded execution:
-python scripts/06_fold_preprocessing_pilot.py --fold 1 --instrument mag --execute
+python scripts/4_preprocessing/4b_fold_preprocessing_pilot.py --fold 1 --instrument mag --execute
 ```
 
 See [normalization and batching workflow](docs/preprocessing_and_batches.md). The two-event integration pilot's normalizer is **not** the final fold-level normalizer, and no CNN has been trained.

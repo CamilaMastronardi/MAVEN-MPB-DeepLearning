@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import sys
 from datetime import timedelta, timezone, datetime
 from importlib import import_module
 from pathlib import Path
@@ -19,12 +20,20 @@ from pathlib import Path
 import numpy as np
 from google.cloud import bigquery
 
-from windowing import WindowStats, iter_native_windows
+# The numbered scripts live in stage-specific folders. Expose the repository
+# root so direct CLI execution can resolve their namespace packages.
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+windowing = import_module("scripts.3_windowing.3a_windowing")
+WindowStats = windowing.WindowStats
+iter_native_windows = windowing.iter_native_windows
 
 # Reuse the verified SQL, safety guards, schema and spectral band from the
 # existing BigQuery pilot rather than duplicating them here. Importing it
 # performs NO queries: its main() is guarded by __name__ == '__main__'.
-bq = import_module("02_bigquery_event_pilot")
+bq = import_module("scripts.1_bigquery.1c_bigquery_event_pilot")
 MANIFEST = Path("data/splits/cv4_monthly_manifest.csv")
 WINDOW_SECONDS = 600.0
 CENTER_RANGE_SECONDS = 1800.0
