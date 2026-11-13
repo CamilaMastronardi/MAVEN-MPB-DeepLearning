@@ -162,11 +162,11 @@ See [BigQuery-only pilot workflow](docs/bigquery_event_pilot.md). In training, q
 A 600-second window centered at **2014-11-12 13:46:33 UTC** was examined **directly in BigQuery** and analyzed in RAM, without writing any scientific measurements locally.
 
 - **MAG:** 600 samples (4 channels), event median cadence 1.0 s, max gap approximately 1.001 s, zero invalid field values.
-- **SWEA svy3d (pilot before band restriction):** 18 timestamps, **median cadence 32 s** (compared with median 16 s across the previously measured 559 covered labeled events); original cube 6 elevation × 16 azimuth × 64 energy, provisional full-range energy-time summary of shape 18 × 64, energy range 3–4630 eV, no missing valid angular flux for the 1,152 energy-time cells. The new **30–100 eV-only** query has not yet been executed, so its number of selected energy bins is still to be measured.
+- **SWEA svy3d (pilot before band restriction):** 18 timestamps, **median cadence 32 s** (compared with median 16 s across the previously measured 559 covered labeled events); original cube 6 elevation × 16 azimuth × 64 energy, provisional full-range energy-time summary of shape 18 × 64, energy range 3–4630 eV, no missing valid angular flux for the 1,152 energy-time cells. The subsequent **30–100 eV-only** query was executed and selected **11** physical energy channels in the tested event.
 - **SWEA `quality` (historical pilot):** all 18 samples have value `-1`. We are not using that flag as an exclusion criterion; model inputs will be selected by the agreed energy range.
 - **Scientific caution:** do not assume that 600 s always contains 38 SWEA measurements. The native SWEA cadence can vary between events; build variable-time-length inputs or apply an explicitly documented *within-SWEA* padding/masking strategy, preserving instrument-specific cadence and window movement by one native measurement.
 
-Next: run the 30–100 eV-only SWEA pilot, verify the number of channels in the stored energy axis, then implement sliding-window inputs for each instrument with separate native cadences and detection-score curves.
+The 30–100 eV SWEA pilot and native-cadence window generators were subsequently implemented and verified on real events; see the windowing and preprocessing sections below.
 
 ## Cross-validation splits (four folds)
 
@@ -220,6 +220,20 @@ python scripts/4_preprocessing/4b_fold_preprocessing_pilot.py --fold 1 --instrum
 
 See [normalization and batching workflow](docs/preprocessing_and_batches.md). The two-event integration pilot's normalizer is **not** the final fold-level normalizer, and no CNN has been trained.
 
+## Full-fold training normalization (step 4c)
+
+MAG and SWEA train/validation normalization **pilots have now both succeeded on WSL**. The SWEA validation event used 11 physical energy channels and padded batches of different native lengths (37 train vs 19 validation time positions), with statistics fit exclusively from the training event. These pilot statistics are **not yet fold-wide**.
+
+`scripts/4_preprocessing/4c_fit_fold_normalizers.py` is the next step. It groups the ±35-minute training-event supports by UTC date, merges overlapping intervals, and processes unique observation epochs from BigQuery one date at a time. Train-only mean and variance are updated in memory; tiny JSON checkpoints allow safe resumption. The instrument's full-fold normalizer is written **only when every planned training day is processed**.
+
+```bash
+python -m unittest discover -s tests -v
+python scripts/4_preprocessing/4c_fit_fold_normalizers.py --fold 1 --instrument mag
+python scripts/4_preprocessing/4c_fit_fold_normalizers.py --fold 1 --instrument mag --execute
+```
+
+By default only **3 pending UTC dates** are selected per run, with dry-run estimates and byte caps. Repeat the same `--execute` command to continue from the small checkpoint. See [full-fold normalization](docs/full_fold_normalization.md).
+
 ## Status
 
-All four annotation groups are integrated. Timestamp coverage has been measured for 569 MAG and 559 SWEA events. The first BigQuery-only pilot ran successfully for MAG and SWEA without persisting scientific data. The **30–100 eV** SWEA restriction has been committed but not yet rechecked in a second pilot. Cross-validation event splits (4 monthly-grouped folds) have been created and versioned; no model training results are claimed. Next: validate the normalization-and-masked-batch integration pilot, deduplicate overlapping training data blocks, fit fold-wide statistics using only training months, and construct mask-aware CNN architectures with cautious label sampling.
+All four annotation groups are integrated. Timestamp coverage has been measured for 569 MAG and 559 SWEA events. The first BigQuery-only pilot ran successfully for MAG and SWEA without persisting scientific data. The **30–100 eV** SWEA band has been verified in real data (11 selected channels for the pilot event). Cross-validation event splits (4 monthly-grouped folds) have been created and versioned; no model training results are claimed. Both single-event train/validation normalization pilots have run successfully for MAG and SWEA. Next: execute the resumable full-fold normalization step 4c, then construct mask-aware CNN architectures and cautious label sampling.
