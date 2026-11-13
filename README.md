@@ -190,7 +190,7 @@ See [cross-validation design and leakage caveats](docs/cross_validation.md). **N
 
 ## Native-cadence sliding-window pilot (MAG and SWEA)
 
-The split-aware window generator is in `scripts/3_windowing/3a_3a_windowing.py`, with a BigQuery-to-RAM pilot in `scripts/3_windowing/3b_bigquery_window_pilot.py`. For a selected CV fold/event, it retrieves each instrument's **70-minute** block once (window centers within ±30 min of the labeled MPB, with ±5 min support) and yields **600-second windows, one native sample apart**. It rejects missing-edge, large-gap, and nonfinite windows; retains native MAG/SWEA cadences and SWEA energy channels in **30–100 eV**; creates a Gaussian target from the nearest *known* MPB annotation in the current training or validation subset.
+The split-aware window generator is in `scripts/3_windowing/3a_windowing.py`, with a BigQuery-to-RAM pilot in `scripts/3_windowing/3b_bigquery_window_pilot.py`. For a selected CV fold/event, it retrieves each instrument's **70-minute** block once (window centers within ±30 min of the labeled MPB, with ±5 min support) and yields **600-second windows, one native sample apart**. It rejects missing-edge, large-gap, and nonfinite windows; retains native MAG/SWEA cadences and SWEA energy channels in **30–100 eV**; creates a Gaussian target from the nearest *known* MPB annotation in the current training or validation subset.
 
 ```bash
 python -m unittest discover -s tests -v
@@ -204,7 +204,7 @@ By default the pilot performs **dry-run estimates only**. `--execute` queries at
 
 The first CV fold event produced **3,600 MAG windows (4×601)** and **112 SWEA windows (1×11×19)**, with **zero rejected windows**; the selected SWEA energy axis contains eleven channels within 30–100 eV. The Gaussian target `y>=0.5` occurs in 142 MAG and 4 SWEA windows. These heavily overlapping windows are *not independent events*.
 
-`scripts/4_preprocessing/4a_4a_native_batches.py` provides train-only per-channel streaming normalization (MAG: z-score; SWEA: `log10(1+flux)` then per-energy z-score), shape-preserving native-time padded batches with time masks, and provisional masked reconstruction / weighted proximity regression losses. **Normalization must be fitted separately for each CV fold on unique training epochs only**, never on held-out measurements. Model convolutions and readout must also handle padded time indices.
+`scripts/4_preprocessing/4a_native_batches.py` provides train-only per-channel streaming normalization (MAG: z-score; SWEA: `log10(1+flux)` then per-energy z-score), shape-preserving native-time padded batches with time masks, and provisional masked reconstruction / weighted proximity regression losses. **Normalization must be fitted separately for each CV fold on unique training epochs only**, never on held-out measurements. Model convolutions and readout must also handle padded time indices.
 
 A limited, dry-run-first integrated pilot checks two real BigQuery event blocks (one training, one held-out validation) without saving measurements:
 
