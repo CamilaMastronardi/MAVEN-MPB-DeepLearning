@@ -28,7 +28,7 @@ Apply separate normalization for each `(held_out_fold, instrument)` pair, using 
 
 Fit the normalizer on **unique raw measurement epochs** (training blocks with overlap deduplicated), **not on every overlapping training window**; otherwise samples repeated across many overlapping windows would distort the statistics. Implement this deduplication before fitting a full-fold scaler.
 
-The `FoldChannelNormalizer` implementation in `scripts/4_preprocessing/4a_4a_native_batches.py` *requires an explicit source fold* when updating statistics, and rejects a source fold matching the held-out fold. Once frozen, the same transformation can be applied to either training or validation samples.
+The `FoldChannelNormalizer` implementation in `scripts/4_preprocessing/4a_native_batches.py` *requires an explicit source fold* when updating statistics, and rejects a source fold matching the held-out fold. Once frozen, the same transformation can be applied to either training or validation samples.
 
 The transformation is a provisional default, not a validated choice for every instrument/channel.
 
