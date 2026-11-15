@@ -234,6 +234,17 @@ python scripts/4_preprocessing/4c_fit_fold_normalizers.py --fold 1 --instrument 
 
 By default only **3 pending UTC dates** are selected per run, with dry-run estimates and byte caps. Repeat the same `--execute` command to continue from the small checkpoint. See [full-fold normalization](docs/full_fold_normalization.md).
 
+## Jupyter notebooks for supervised autoencoders (real data only)
+
+The educational notebooks [MAG](notebooks/01_mag_autoencoder.ipynb) and
+[SWEA](notebooks/02_swea_autoencoder.ipynb) have been created with **no
+synthetic measurements and no execution outputs**. They are real-MAVEN-only
+scaffolds: load a finished training-fold normalization JSON, select a TRAIN
+event, make a bounded BigQuery request and visualize one native-cadence window.
+An explicit notebook flag, `EXECUTE_REAL_BIGQUERY = False`, blocks any
+science-data request by default. Model architecture and training will be built
+incrementally after inspecting real windows. See [notebook instructions](notebooks/README.md).
+
 ## Status
 
 All four annotation groups are integrated. Timestamp coverage has been measured for 569 MAG and 559 SWEA events. The first BigQuery-only pilot ran successfully for MAG and SWEA without persisting scientific data. The **30–100 eV** SWEA band has been verified in real data (11 selected channels for the pilot event). Cross-validation event splits (4 monthly-grouped folds) have been created and versioned; no model training results are claimed. Both single-event train/validation normalization pilots have run successfully for MAG and SWEA. Next: execute the resumable full-fold normalization step 4c, then construct mask-aware CNN architectures and cautious label sampling.
