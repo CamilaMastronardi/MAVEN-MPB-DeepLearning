@@ -5,6 +5,7 @@ No synthetic MAVEN measurements, model training, or BigQuery requests.
 import importlib
 import json
 import tempfile
+from types import SimpleNamespace
 import numpy as np
 import unittest
 from pathlib import Path
@@ -85,6 +86,46 @@ class MagCaseSelectionTests(unittest.TestCase):
         self.assertAlmostEqual(metrics["rmse_vector_magnitude_nt"], 5.)
         self.assertAlmostEqual(metrics["rmse_magnitude_consistency_nt"], 5.)
 
+
+
+    def test_sixth_reconstruction_uses_native_epoch_grid(self):
+        """Tiny arrays validate figure alignment, not synthetic physics data."""
+        from src.detection.mag_dense_temporal_autoencoder import (
+            MagDenseTemporalAutoencoder
+        )
+        torch = importlib.import_module("torch")
+        torch.set_num_threads(1)
+
+        class FixedNormalizer:
+            instrument = "MAG"
+            is_frozen = True
+            n_features = 4
+            mean = np.zeros(4)
+            scale = np.ones(4)
+
+            @staticmethod
+            def transform(data):
+                return data.astype(np.float32)
+
+        times = np.arange(-7., 8.)
+        values = np.zeros((len(times), 4), dtype=np.float64)
+        windows = [
+            SimpleNamespace(
+                center_s=center, data=values,
+                relative_times_s=times - center,
+                detection_score=1., offset_from_nearest_mpb_s=center
+            ) for center in (0., 1.)
+        ]
+        model = MagDenseTemporalAutoencoder()
+        model.eval()
+        output = figure.reconstruct_block(
+            model, FixedNormalizer(), times, windows, batch_size=2,
+            event_time_s=0., sigma_seconds=60.
+        )
+        self.assertEqual(output["n_scored_windows"], 2)
+        self.assertEqual(len(output["scores"]), len(times))
+        np.testing.assert_array_equal(output["centers_s"], times)
+        self.assertTrue(np.isfinite(output["scores"]).all())
 
 
 if __name__ == "__main__":
