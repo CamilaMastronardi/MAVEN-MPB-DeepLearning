@@ -260,6 +260,60 @@ def plot_event_error_distribution(errors, output_path: Path):
     return output_path, median_s, accurate, len(total)
 
 
+
+def plot_fold_comparison(current, previous, path: Path):
+    """Same-fold 600-center CV comparison of third vs second training."""
+    if [int(r["fold"]) for r in current] != [int(r["fold"]) for r in previous]:
+        raise ValueError("Comparison requires identical fold ordering.")
+    for a, b in zip(current, previous):
+        if int(a["val_evaluable_events"]) != int(b["val_evaluable_events"]):
+            raise ValueError("Comparison requires equal evaluated event counts.")
+
+    folds = [int(row["fold"]) for row in current]
+    x = np.arange(len(folds), dtype=float)
+    fig, axes = plt.subplots(1, 2, figsize=(12.5, 5.),
+                             layout="constrained")
+    metrics = [
+        ("median_abs_peak_error_s", 1 / 60., "Error mediano (min)"),
+        ("fraction_within_60s", 100., "Cruces con error ≤60 s (%)"),
+    ]
+    for ax, (key, scale, label) in zip(axes, metrics):
+        old = [float(row[key]) * scale for row in previous]
+        new = [float(row[key]) * scale for row in current]
+        bars_old = ax.bar(x - 0.19, old, width=0.38,
+                          label="Segundo entrenamiento")
+        bars_new = ax.bar(x + 0.19, new, width=0.38,
+                          label="Tercer entrenamiento")
+        ax.set_xticks(x, [f"Fold {fold}" for fold in folds])
+        ax.set_ylabel(label)
+        ax.set_ylim(0, max(old + new) * 1.20)
+        ax.grid(axis="y", alpha=0.22)
+        ax.set_axisbelow(True)
+        for bar, value in zip(bars_old, old):
+            ax.annotate(f"{value:.1f}", (bar.get_x() + bar.get_width()/2,
+                                        bar.get_height()),
+                        ha="center", va="bottom", fontsize=8,
+                        xytext=(0, 4), textcoords="offset points")
+        for bar, value in zip(bars_new, new):
+            ax.annotate(f"{value:.1f}", (bar.get_x() + bar.get_width()/2,
+                                        bar.get_height()),
+                        ha="center", va="bottom", fontsize=8,
+                        xytext=(0, 4), textcoords="offset points")
+    axes[0].legend(loc="upper right", fontsize=8)
+    fig.suptitle("MAG — segundo vs tercer entrenamiento (misma CV)",
+                 fontsize=14, fontweight="bold")
+    fig.supxlabel(
+        "Ambos experimentos evaluaron 600 centros por MPB y los mismos folds. "
+        "Se modificaron la pérdida y el criterio de entrenamiento.",
+        fontsize=9
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--summary", type=Path, default=DEFAULT_RESULTS / "cv_summary.json",
@@ -267,7 +321,11 @@ def main():
     parser.add_argument("--output", type=Path, default=None,
                         help="Ruta PNG de salida para la figura resumen.")
     parser.add_argument("--summary-only", action="store_true",
-                        help="Generar solo figura resumen, sin historial ni errores.")
+                        help="Generar solo figura resumen, sin diagnósticos extra.")
+    parser.add_argument("--compare-to", type=Path, default=None,
+                        help="cv_summary.json anterior para comparación por fold.")
+    parser.add_argument("--no-comparison", action="store_true",
+                        help="Omitir la comparación automática con el segundo entrenamiento.")
     args = parser.parse_args()
 
     rows = load_summary(args.summary)
@@ -306,6 +364,21 @@ def main():
               f"({median_s/60.:.2f} min).")
         print(f"Error <= 60 s: {n_accurate}/{n_total} "
               f"({n_accurate/n_total:.2%}).")
+
+        prior = args.compare_to
+        if prior is None and not args.no_comparison and args.summary.parent == DEFAULT_RESULTS:
+            prior = Path("results/metrics/mag_cv_600windows_det10/cv_summary.json")
+        if prior is not None:
+            if not prior.is_file():
+                if args.compare_to is not None:
+                    raise FileNotFoundError(f"Comparison summary not found: {prior}")
+                print(f"Comparación omitida: no existe {prior}.")
+            else:
+                earlier = load_summary(prior)
+                compared = plot_fold_comparison(
+                    rows, earlier, figures_dir / "mag_cv_second_vs_third.png"
+                )
+                print(f"Comparación 2º vs 3º: {compared.resolve()}")
 
 
 if __name__ == "__main__":
