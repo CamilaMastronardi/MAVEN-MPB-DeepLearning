@@ -5,6 +5,7 @@ No synthetic MAVEN measurements, model training, or BigQuery requests.
 import importlib
 import json
 import tempfile
+import numpy as np
 import unittest
 from pathlib import Path
 from datetime import datetime, timezone
@@ -71,6 +72,19 @@ class MagCaseSelectionTests(unittest.TestCase):
         events = [{"fold": 1, "time": t, "error_s": 900.}]
         with self.assertRaises(ValueError):
             figure.select_cases(events, 60., 600.)
+
+
+    def test_magnitude_diagnostics_are_in_physical_nt(self):
+        """Pure vector algebra fixture, not simulated or downloaded MAG data."""
+        observed = np.array([[3., 4., 0., 5.],
+                             [3., 4., 0., 5.]])
+        reconstructed = np.array([[6., 8., 0., 5.],
+                                  [np.nan, np.nan, np.nan, np.nan]])
+        metrics = figure.magnitude_diagnostics(observed, reconstructed)
+        self.assertAlmostEqual(metrics["rmse_decoded_magnitude_nt"], 0.)
+        self.assertAlmostEqual(metrics["rmse_vector_magnitude_nt"], 5.)
+        self.assertAlmostEqual(metrics["rmse_magnitude_consistency_nt"], 5.)
+
 
 
 if __name__ == "__main__":
