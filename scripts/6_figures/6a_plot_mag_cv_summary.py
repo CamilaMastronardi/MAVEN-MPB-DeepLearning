@@ -353,6 +353,19 @@ def main():
     if not args.summary_only:
         figures_dir = args.summary.parent / "figures"
         histories = read_fold_histories(args.summary.parent)
+        print("\nTERCER ENTRENAMIENTO MAG — métricas por fold"
+              if args.summary.parent == DEFAULT_RESULTS
+              else "\nEntrenamiento MAG — métricas por fold")
+        print("Fold | Eventos | Mejor época | Error mediano (min) | Error ≤60 s (%)")
+        for row in rows:
+            fold = int(row["fold"])
+            _, best_epoch = histories[fold]
+            print(
+                f"{fold:4d} | {int(row['val_evaluable_events']):7d} | "
+                f"{best_epoch:11d} | "
+                f"{float(row['median_abs_peak_error_s'])/60.:18.2f} | "
+                f"{float(row['fraction_within_60s'])*100:14.2f}"
+            )
         losses = plot_training_histories(
             histories, figures_dir / "mag_cv_training_losses.png"
         )
