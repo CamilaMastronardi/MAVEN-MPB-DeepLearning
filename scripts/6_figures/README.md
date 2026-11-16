@@ -146,3 +146,19 @@ los folds. `--max-total-gib` y `--max-query-gib` ajustan los límites
 de las consultas. Si una puntuación recalculada difiere de la registrada
 en el CSV por más de 2 s de desplazamiento, el programa se detiene
 en lugar de presentar un caso potencialmente mal etiquetado.
+
+## Quinto MAG residual-transition (opcional)
+
+Los dos scripts también aceptan el quinto experimento: `6a` compara sus
+métricas con el cuarto sobre la misma CV, y `6b` carga los pesos de su
+encoder residual y el detector asimétrico para graficar eventos reales.
+Cuando termine el quinto:
+
+```bash
+python scripts/6_figures/6a_plot_mag_cv_summary.py \
+  --summary results/metrics/mag_cv_residual_transition_v1/cv_summary.json \
+  --compare-to results/metrics/mag_cv_transition_v1/cv_summary.json
+
+python scripts/6_figures/6b_plot_mag_reconstruction_cases.py \
+  --results-dir results/metrics/mag_cv_residual_transition_v1 --execute
+```
