@@ -75,6 +75,19 @@ class MagDenseTemporalAutoencoder(MagResidualTransitionAutoencoder):
                 or time_mask.dtype != torch.bool
                 or not bool(time_mask.any(dim=1).all())):
             raise ValueError("Invalid dense temporal MAG time/mask shape.")
+        if bool(((~time_mask[:, :-1]) & time_mask[:, 1:]).any()):
+            raise ValueError(
+                "Dense temporal native masks must be valid prefixes "
+                "with padding only at the end."
+            )
+        if not bool(torch.isfinite(rel_time_s[time_mask]).all()):
+            raise ValueError("Dense MAG times must be finite at valid epochs.")
+        if not bool((rel_time_s[:, 1:].masked_fill(
+                ~(time_mask[:, 1:] & time_mask[:, :-1]), float("inf")
+            ) - rel_time_s[:, :-1]).masked_fill(
+                ~(time_mask[:, 1:] & time_mask[:, :-1]), 1.0
+            ).gt(0).all()):
+            raise ValueError("Dense MAG valid timestamps must be strictly increasing.")
         mask = time_mask[:, None, :].to(z.dtype)
         z = z * mask
         sorted_times = rel_time_s.masked_fill(
