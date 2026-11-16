@@ -403,3 +403,24 @@ bash scripts/5_training/run_mag_cv_dense_temporal.sh
 
 Salida independiente: `results/metrics/mag_cv_dense_temporal_v1/`.
 Manual: `docs/mag_sixth_training.md`.
+
+## Séptimo entrenamiento — MAG+SWEA y clasificación física de regiones
+
+El modelo v7 cambia el objetivo: en lugar de predecir una gaussiana de
+proximidad a la MPB usando solo MAG, aprende **regiones magnetosheath / magnetosfera
+inducida y transiciones MPB** con dos encoders independientes MAG y SWEA,
+ambos a su cadencia nativa. Dos decoders conservan la reconstrucción como
+aprendizaje auxiliar. Las etiquetas débiles se construyen con tiempos MPB y BS
+asociados, dejando fuera intervalos ambiguos y posibles cruces adicionales.
+
+Se admiten hasta 559 eventos MAG+SWEA del manifiesto; se reutiliza la caché
+MAG y se crea una caché SWEA con energías físicas 30–300 eV, sin remuestreo
+temporal. Se mantienen cuatro folds externos y monitor por meses internos.
+
+```bash
+git pull origin main
+bash scripts/5_training/run_mag_swea_regions_v7.sh
+```
+
+Salida nueva: `results/metrics/mag_swea_regions_v1/`.
+Manual: `docs/mag_swea_seventh_training.md`.
