@@ -263,7 +263,7 @@ def plot_event_error_distribution(errors, output_path: Path):
 
 def plot_fold_comparison(current, previous, path: Path, *,
                          current_label="Tercer entrenamiento",
-                         previous_label=previous_label):
+                         previous_label="Segundo entrenamiento"):
     """Same-fold, same-sample-resolution CV comparison of MAG experiments."""
     if [int(r["fold"]) for r in current] != [int(r["fold"]) for r in previous]:
         raise ValueError("Comparison requires identical fold ordering.")
@@ -283,7 +283,7 @@ def plot_fold_comparison(current, previous, path: Path, *,
         old = [float(row[key]) * scale for row in previous]
         new = [float(row[key]) * scale for row in current]
         bars_old = ax.bar(x - 0.19, old, width=0.38,
-                          label="Segundo entrenamiento")
+                          label=previous_label)
         bars_new = ax.bar(x + 0.19, new, width=0.38,
                           label=current_label)
         ax.set_xticks(x, [f"Fold {fold}" for fold in folds])
