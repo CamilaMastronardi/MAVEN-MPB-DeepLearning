@@ -1,3 +1,52 @@
+## Entrenamiento COMPLETO MAG con los cuatro folds (todos los eventos)
+
+Cuando se requiere el entrenamiento completo, **NO** usar
+`run_mag_cv_pilot.sh` ni seleccionar `--max-train-events 30` /
+`--max-val-events 10`. Hay un launcher específico:
+
+```bash
+cd ~/Codigos/MAVEN-MPB-DeepLearning
+source .venv/bin/activate
+git pull origin main
+tmux new -s mag_cv_full
+bash scripts/5_training/run_mag_cv_full.sh
+```
+
+Por defecto utiliza los cuatro folds, **todos los eventos train/val**,
+`--max-train-events 0 --max-val-events 0`, 10 épocas fijas por fold,
+checkpoints al terminar cada época y un límite total de **150 GiB
+estimados** para las consultas BigQuery de todos los eventos distintos.
+Realiza las pruebas offline y el preflight de las consultas *antes de*
+descargar cualquier medición. Si el costo estimado supera el límite,
+**se detiene antes de ejecutar las consultas de mediciones**.
+
+Los 150 GiB son un límite de bytes procesados estimados para esta
+ejecución, no una cota de RAM ni un presupuesto monetario garantizado.
+Las cuotas personalizadas de BigQuery pueden ser más restrictivas.
+Se puede fijar otro límite antes de lanzar con
+`MAX_TOTAL_GIB=120 bash scripts/5_training/run_mag_cv_full.sh`;
+esto no implica recomendación de subir la cuota.
+
+Para dejar trabajando tmux: `Ctrl+B`, después `D`.
+La computadora debe seguir encendida y sin suspenderse.
+Volver con `tmux attach -t mag_cv_full`.
+
+Salidas: `results/metrics/mag_cv_full/`: `fold_01_last.pt`,
+`fold_01_final.pt`, `fold_01_metrics.json`,
+`fold_01_event_metrics.csv` (y análogos para los demás folds),
+`cv_summary.json` y `training.log`.
+Si se interrumpe, el launcher reanuda los checkpoints, pero debe
+**volver a consultar los bloques de MAVEN** que estaban sólo en RAM.
+
+**Advertencia metodológica:** trabajar con todos los eventos
+no significa que el modelo esté optimizado. Las 10 épocas y el muestreo
+de 24 ventanas de entrenamiento y 121 centros de validación por evento
+son elecciones iniciales fijas. Los resultados evalúan localización
+del pico **condicionada a MPB conocida**, no tasa de falsos positivos
+en trayectorias sin cruce. No son métricas finales de detección general.
+
+---
+
 # Entrenamiento inicial de MAG: autoencoder convolucional supervisado y 4 folds
 
 El programa `scripts/5_training/5a_train_mag_cv.py` es un **primer entrenamiento
