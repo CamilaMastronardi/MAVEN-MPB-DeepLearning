@@ -37,6 +37,7 @@ windowing = import_module("scripts.3_windowing.3a_windowing")
 batching = import_module("scripts.4_preprocessing.4a_native_batches")
 fitter = import_module("scripts.4_preprocessing.4c_fit_fold_normalizers")
 from src.detection.mag_autoencoder import MagSupervisedAutoencoder
+from src.detection.mag_transition_autoencoder import MagTransitionAutoencoder
 
 DEFAULT_MANIFEST = Path("data/splits/cv4_monthly_manifest.csv")
 DEFAULT_NORMALIZERS = Path("results/metrics/fold_normalization")
@@ -53,6 +54,13 @@ def parser():
     p.add_argument("--normalizers-dir", type=Path, default=DEFAULT_NORMALIZERS)
     p.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)
     p.add_argument("--folds", choices=("all", "1", "2", "3", "4"), default="all")
+    p.add_argument("--architecture", choices=("baseline", "transition"),
+                   default="baseline",
+                   help="Baseline v1 or asymmetric before/after transition detector.")
+    p.add_argument("--transition-side-offset-s", type=float, default=120.,
+                   help="Before/after pooling lobes centered at +/- this many seconds.")
+    p.add_argument("--transition-center-exclusion-s", type=float, default=15.,
+                   help="Exclude central +/- seconds from both side pooling regions.")
     p.add_argument("--epochs", type=int, default=1000)
     p.add_argument("--min-epochs", type=int, default=25,
                    help="Complete a full rotation of 600 targets at 24 per epoch.")
@@ -102,6 +110,10 @@ def parser():
     if (a.max_train_events < 0 or a.max_val_events < 0
             or a.lambda_detection < 0 or a.early_stop_min_delta < 0):
         p.error("Invalid subset counts or detection-loss multiplier.")
+    if (a.architecture == "transition"
+            and not (0 <= a.transition_center_exclusion_s
+                     < a.transition_side_offset_s)):
+        p.error("Transition model requires 0 <= center exclusion < side offset.")
     if a.train_windows_per_event < 2:
         p.error("--train-windows-per-event must be >= 2.")
     if a.train_windows_per_epoch > a.train_windows_per_event:
@@ -208,7 +220,24 @@ def signature(args, fold, train, val, normalizer_sha):
         "monitor_centers_per_event": args.monitor_centers_per_event,
         "inner_month_holdout_fraction": 0.10,
     }
+    # Preserve the *exact* original signature for in-progress baseline folds.
+    if args.architecture == "transition":
+        cfg["architecture"] = "MAG-CNN-latent2-before-after-v1"
+        cfg["transition_side_offset_s"] = args.transition_side_offset_s
+        cfg["transition_center_exclusion_s"] = args.transition_center_exclusion_s
     return hashlib.sha256(json.dumps(cfg, sort_keys=True).encode()).hexdigest()
+
+
+def build_mag_model(args):
+    """Select architecture without altering baseline checkpoint compatibility."""
+    if args.architecture == "baseline":
+        return MagSupervisedAutoencoder()
+    if args.architecture == "transition":
+        return MagTransitionAutoencoder(
+            side_offset_s=args.transition_side_offset_s,
+            center_exclusion_s=args.transition_center_exclusion_s,
+        )
+    raise ValueError(f"Unknown MAG architecture: {args.architecture}")
 
 
 def split_inner_monitor_months(train, fold, seed):
@@ -654,7 +683,7 @@ def train_fold(fold, selected, blocks, normalizer, run_sig, args, device,
     torch.manual_seed(args.seed + fold)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed + fold)
-    model = MagSupervisedAutoencoder().to(device)
+    model = build_mag_model(args).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
     checkpoint_path = args.output_dir / f"fold_{fold:02d}_last.pt"
     best_path = args.output_dir / f"fold_{fold:02d}_best.pt"
@@ -782,6 +811,7 @@ def train_fold(fold, selected, blocks, normalizer, run_sig, args, device,
         "lambda_detection": args.lambda_detection,
         "lambda_magnitude": args.lambda_magnitude,
         "sigma_seconds": args.sigma_seconds,
+        "architecture": args.architecture,
         "val_events_selected": len(val), "train_history": history,
         "pilot_subset": bool(args.max_train_events or args.max_val_events),
         **metrics,
@@ -791,6 +821,15 @@ def train_fold(fold, selected, blocks, normalizer, run_sig, args, device,
         "best_epoch": best_epoch, "model": model.state_dict(), "config": {
             "sigma_seconds": args.sigma_seconds, "hidden": 16,
             "latent_channels": 2, "pooling_sigma_s": 90.0,
+            "architecture": args.architecture,
+            "transition_side_offset_s": (
+                args.transition_side_offset_s if args.architecture == "transition"
+                else None
+            ),
+            "transition_center_exclusion_s": (
+                args.transition_center_exclusion_s
+                if args.architecture == "transition" else None
+            ),
         }
     })
     save_events_csv(event_path, event_rows)
@@ -891,6 +930,7 @@ def main():
             "lambda_detection": args.lambda_detection,
             "lambda_magnitude": args.lambda_magnitude,
             "near_label_weight": args.near_label_weight,
+            "architecture": args.architecture,
             "min_epochs": args.min_epochs,
             "max_epochs": args.epochs,
             "early_stop_patience": args.early_stop_patience,
