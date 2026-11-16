@@ -58,3 +58,21 @@ python scripts/4_preprocessing/4c_fit_fold_normalizers.py --fold 1 --instrument 
 Los comandos con BigQuery hacen estimaciones por defecto. Sólo `--execute`
 realiza consultas de mediciones. Los pilotos trabajan temporalmente en RAM:
 los datos científicos permanecen almacenados en BigQuery.
+
+## 5. Entrenamiento MAG — `5_training/`
+
+- `5a_train_mag_cv.py`: entrenamiento **real MAG**, independiente de Jupyter, con encoder–decoder–detector supervisado, validación cruzada de 4 folds agrupados por mes, estadísticos de normalización train-only, descarga de eventos una sola vez en RAM y checkpoints por época.
+
+```bash
+# Pruebas locales, sin BigQuery:
+python -m unittest discover -s tests -v
+
+# Estimación para un piloto de los 4 folds, sin consultas de mediciones:
+python scripts/5_training/5a_train_mag_cv.py --folds all --epochs 3 --max-train-events 30 --max-val-events 10 --max-total-gib 35
+
+# Ejecutar el piloto después de revisar la estimación:
+python -u scripts/5_training/5a_train_mag_cv.py --folds all --epochs 3 --max-train-events 30 --max-val-events 10 --max-total-gib 35 --resume --execute
+```
+
+El piloto **no es la validación completa**. Para metodología, gastos estimados,
+reanudación y métricas de localización, ver `docs/mag_cross_validation_training.md`.
