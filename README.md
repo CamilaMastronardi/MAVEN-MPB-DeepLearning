@@ -362,3 +362,25 @@ Todas las figuras quedan en `results/metrics/mag_cv_600windows_det10_mag1_pat20_
 Los modelos y resultados de los entrenamientos previos y del cuarto
 entrenamiento en curso permanecen independientes. Ver
 `scripts/6_figures/README.md`.
+
+## Quinto entrenamiento MAG — encoder residual y caché local de BigQuery
+
+El quinto modelo reemplaza el encoder CNN del cuarto por una CNN temporal
+residual con **32 canales ocultos, 8 latentes y 7 convoluciones dilatadas**
+(campo receptivo teórico de 515 muestras). Mantiene el detector asimétrico
+antes/después, las pérdidas y los cuatro folds. El entrenamiento previo no
+se ve afectado: launcher y resultados independientes.
+
+La quinta versión activa una **caché local persistente**, en
+`data/cache/mag_events/` (ignorada por Git), con MAG original sin normalizar,
+checksums y procedencia de BigQuery. En la primera ejecución consulta los
+bloques faltantes; después los reutiliza, incluso tras apagar la PC.
+
+```bash
+# Cuando haya terminado el cuarto modelo:
+git pull origin main
+bash scripts/5_training/run_mag_cv_residual.sh
+```
+
+Resultados: `results/metrics/mag_cv_residual_transition_v1/`.
+Manual: `docs/mag_fifth_training.md`.
