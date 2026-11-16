@@ -24,12 +24,14 @@ Salida por defecto:
 - `results/metrics/mag_cv_600windows_det10_mag1_pat20_ep1000/figures/mag_cv_third_training.png`
 - `results/metrics/mag_cv_600windows_det10_mag1_pat20_ep1000/figures/mag_cv_training_losses.png`
 - `results/metrics/mag_cv_600windows_det10_mag1_pat20_ep1000/figures/mag_cv_error_distribution.png`
+- `results/metrics/mag_cv_600windows_det10_mag1_pat20_ep1000/figures/mag_cv_second_vs_third.png` (si hay resumen del segundo entrenamiento)
 
 El mismo script reproduce el primer, segundo o cuarto entrenamiento indicando
 el `--summary` correspondiente. Todas las imágenes se guardan junto a las
 métricas del experimento elegido; no se sobrescriben figuras de otras carpetas.
 
-De forma predeterminada produce **tres figuras**:
+De forma predeterminada produce **tres figuras**, más una comparación
+con el segundo entrenamiento si sus métricas siguen disponibles:
 1. Resumen por fold: mediana del error y porcentaje de MPB con error ≤60 s
 2. Curvas `train_rec/val_rec`, `train_det/val_det` y `train_mag/val_mag`
    para cada uno de los cuatro folds; las curvas `val_*` representan el
@@ -37,8 +39,14 @@ De forma predeterminada produce **tres figuras**:
 3. Histograma de errores absolutos sobre los **eventos de validación externa**
    y curva acumulada (total y por fold), con mediana global **exacta**
    calculada a partir de los CSV individuales
+4. Comparación (si existe el `cv_summary.json` del segundo experimento):
+   `mag_cv_second_vs_third.png`, con error mediano y fracción ≤60 s
+   por fold en ambos entrenamientos. Los dos evaluaron 600 centros
+   temporales por evento, por lo que la resolución es comparable.
 
 Para generar solamente la figura resumen, usar `--summary-only`.
+Para desactivar la comparación automática, usar `--no-comparison`;
+`--compare-to` permite indicar otro resumen.
 
 La figura contiene dos paneles: error mediano de localización (minutos)
 y porcentaje de eventos localizados con error absoluto ≤60 segundos por fold.
