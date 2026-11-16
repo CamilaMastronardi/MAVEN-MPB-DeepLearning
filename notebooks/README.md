@@ -53,3 +53,12 @@ superpuestas como muestras independientes.
 No hay que subir los normalizadores JSON locales ni los arreglos científicos
 a GitHub. Antes de publicar notebooks, revisar que no hayan quedado resultados
 de celdas con datos científicos en el propio archivo `.ipynb`.
+
+## Entrenamiento de MAG sin Jupyter
+
+La clase del modelo MAG se comparte con
+`src/detection/mag_autoencoder.py`. Para entrenar por los cuatro folds,
+utilizar el script `scripts/5_training/5a_train_mag_cv.py` desde una sesión
+de WSL/tmux, no desde el notebook. Su ejecución es opt-in y no guarda
+mediciones MAVEN en el disco. La guía de parámetros y métricas está en
+`docs/mag_cross_validation_training.md`.
