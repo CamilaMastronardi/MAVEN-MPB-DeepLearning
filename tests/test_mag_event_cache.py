@@ -97,7 +97,7 @@ class MagCacheTests(unittest.TestCase):
         path = self.cache.save(
             self.event, self.start, self.end, self.times, self.values
         )
-        with self.assertRaisesRegex(ValueError, "row cap"):
+        with self.assertRaisesRegex(ValueError, "--max-returned-rows"):
             self.cache.load(self.event, self.start, self.end, max_rows=2)
         path.write_bytes(b"NOT AN NPZ")
         with self.assertRaises((ValueError, OSError, EOFError)):
