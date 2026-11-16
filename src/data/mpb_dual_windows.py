@@ -69,18 +69,13 @@ def fit_unique_epochs(blocks, times, *, instrument):
             chunks.append((t, x))
     if not chunks:
         raise ValueError(f"No valid TRAIN {instrument} data.")
-    pairs = sorted(
-        [(float(stamp), frame) for t, x in chunks
-         for stamp, frame in zip(t, x)], key=lambda pair: pair[0]
-    )
-    unique_values = []
-    previous = None
-    for stamp, frame in pairs:
-        if previous is not None and abs(stamp-previous) < .001:
-            continue
-        previous = stamp
-        unique_values.append(frame)
-    x = np.asarray(unique_values, dtype=np.float64)
+    # Vectorized de-duplication avoids millions of Python objects for MAG.
+    timestamps = np.concatenate([t for t, _ in chunks]).astype(np.float64)
+    values = np.concatenate([x for _, x in chunks]).astype(np.float64)
+    order = np.argsort(timestamps, kind="stable")
+    unique = np.ones(len(order), dtype=bool)
+    unique[1:] = np.diff(timestamps[order]) >= .001
+    x = values[order[unique]]
     if len(x) < 2 or not np.isfinite(x).all():
         raise ValueError(f"Insufficient finite {instrument} TRAIN epochs.")
     mean = x.mean(axis=0)
