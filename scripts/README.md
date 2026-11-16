@@ -106,3 +106,15 @@ python scripts/6_figures/6b_plot_mag_reconstruction_cases.py --execute # dibujar
 ```
 
 Salida: `results/metrics/mag_cv_full/figures/mag_cv_reconstruction_good_vs_bad.png`.
+
+### Segundo entrenamiento MAG: 600 ventanas + detección priorizada
+
+La versión actual de `run_mag_cv_full.sh` calcula **hasta 600 etiquetas
+por evento** (una por centro de ventana de 600 segundos), utiliza 24 de
+esas ventanas en cada época con una rotación reproducible y garantiza al
+menos 25 épocas para cubrir todos los objetivos. La pérdida conjunta es
+`L_rec + 10*L_det`, manteniendo `sigma=60 s`. Se evalúan hasta 600 centros
+por MPB. Guarda la ejecución en `results/metrics/mag_cv_600windows_det10/`
+para no alterar `mag_cv_full/` del primer entrenamiento.
+
+Ver `docs/mag_cross_validation_training.md` para detalles y límites.
