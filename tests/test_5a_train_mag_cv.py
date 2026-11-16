@@ -1,6 +1,9 @@
 """Offline smoke tests for MAG CV training wiring; no BigQuery calls or training."""
 import importlib
 import unittest
+from types import SimpleNamespace
+
+import numpy as np
 from datetime import datetime, timedelta, timezone
 
 import torch
@@ -9,6 +12,7 @@ MagSupervisedAutoencoder = importlib.import_module(
     "src.detection.mag_autoencoder"
 ).MagSupervisedAutoencoder
 trainer = importlib.import_module("scripts.5_training.5a_train_mag_cv")
+batching = importlib.import_module("scripts.4_preprocessing.4a_native_batches")
 
 
 class MagCVOfflineTests(unittest.TestCase):
@@ -129,6 +133,69 @@ class MagCVOfflineTests(unittest.TestCase):
         self.assertEqual(pool.shape, (600, 3))
         self.assertAlmostEqual(pool[300, 1], 1., places=12)
         self.assertLess(pool[0, 1], 0.001)
+
+
+
+
+    def test_magnitude_loss_is_zero_for_physical_consistent_reconstruction(self):
+        """Only algebraic tensors: never synthetic training/validation MAVEN."""
+        normalizer = SimpleNamespace(
+            instrument="MAG", is_frozen=True,
+            mean=np.array([1., -2., 1., 8.]),
+            scale=np.array([2., 4., 5., 6.]),
+        )
+        # B=(3,4,0) nT, measured |B|=5 nT. Distinct feature scalers.
+        observed = torch.tensor([1., 1.5, -0.2, -0.5]).reshape(1, 4, 1)
+        observed = observed.repeat(1, 1, 3)
+        valid = torch.tensor([[True, True, False]])
+        batch = SimpleNamespace(x=observed, time_mask=valid)
+        predicted = observed.clone()
+        predicted[0, :, 2] = 1000.  # Padding must never affect physical loss.
+        loss = batching.masked_mag_modulus_mse(
+            predicted, batch, normalizer
+        )
+        self.assertAlmostEqual(loss.item(), 0., places=10)
+
+    def test_magnitude_loss_penalizes_channel_and_vector_disagreement(self):
+        normalizer = SimpleNamespace(
+            instrument="MAG", is_frozen=True,
+            mean=np.array([1., -2., 1., 8.]),
+            scale=np.array([2., 4., 5., 6.]),
+        )
+        observed = torch.tensor([1., 1.5, -0.2, -0.5]).reshape(1, 4, 1)
+        batch = SimpleNamespace(
+            x=observed,
+            time_mask=torch.ones((1, 1), dtype=torch.bool),
+        )
+        # Decode |B| channel 6 nT too high, while decoded xyz remain correct.
+        decoded = observed.clone()
+        decoded[0, 3, 0] += 1.
+        channel_loss = batching.masked_mag_modulus_mse(
+            decoded, batch, normalizer
+        )
+        self.assertAlmostEqual(channel_loss.item(), 0.5, places=6)
+
+        # Decode incorrect Bx while keeping decoded |B| channel correct.
+        predicted = observed.clone()
+        predicted[0, 0, 0] += 1.
+        predicted.requires_grad_(True)
+        vector_loss = batching.masked_mag_modulus_mse(
+            predicted, batch, normalizer
+        )
+        self.assertGreater(vector_loss.item(), 0.)
+        vector_loss.backward()
+        self.assertTrue(bool(torch.isfinite(predicted.grad).all()))
+        self.assertNotEqual(float(predicted.grad[0, 0, 0]), 0.)
+
+    def test_magnitude_loss_rejects_unfrozen_normalizer(self):
+        normalizer = SimpleNamespace(
+            instrument="MAG", is_frozen=False,
+            mean=np.zeros(4), scale=np.ones(4),
+        )
+        x = torch.zeros((1, 4, 3))
+        batch = SimpleNamespace(x=x, time_mask=torch.ones((1, 3), dtype=torch.bool))
+        with self.assertRaises(ValueError):
+            batching.masked_mag_modulus_mse(x, batch, normalizer)
 
 
 
