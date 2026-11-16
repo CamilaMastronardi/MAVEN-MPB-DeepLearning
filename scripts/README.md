@@ -83,29 +83,29 @@ pruebas offline antes de consultar BigQuery y conserva logs/checkpoints.
 
 ## 6. Figuras — `6_figures/`
 
-- `6a_plot_mag_cv_summary.py`: figura comparativa del primer entrenamiento
-  MAG de 4 folds (error mediano en minutos y fracción con error ≤60 s).
-  Lee `results/metrics/mag_cv_full/cv_summary.json` y guarda PNG en
-  `results/metrics/mag_cv_full/figures/`.
+Los dos scripts de figuras existentes apuntan por defecto al **tercer
+entrenamiento** MAG, sin tocar los modelos del cuarto entrenamiento en curso.
+
+- `6a_plot_mag_cv_summary.py`: sin BigQuery, genera resumen de los cuatro
+  folds, las tres parejas de pérdidas TRAIN/monitor interno
+  (`rec`, `det`, `mag`), histograma y CDF de los errores de localización,
+  y comparación con el segundo entrenamiento a la misma resolución.
+  Además imprime la mediana global exacta usando los CSV por evento.
+- `6b_plot_mag_reconstruction_cases.py`: reconstrucción de 70 minutos en
+  cuatro canales MAG, casos acertado y fallido, y puntajes de MPB. En
+  `|B|` también muestra el módulo de las componentes reconstruidas y
+  guarda métricas RMSE físicas en nT. Utiliza solo dos consultas acotadas
+  a BigQuery para los eventos seleccionados.
 
 ```bash
 python scripts/6_figures/6a_plot_mag_cv_summary.py
+python scripts/6_figures/6b_plot_mag_reconstruction_cases.py            # dry-run
+python scripts/6_figures/6b_plot_mag_reconstruction_cases.py --execute  # figura
 ```
 
-No ejecuta BigQuery ni reentrena. Ver `scripts/6_figures/README.md`.
-
-- `6b_plot_mag_reconstruction_cases.py`: figura diagnóstica de dos ejemplos
-  reales de MAG (uno bien localizado y otro mal localizado) con cuatro
-  canales observados/reconstruidos sobre 70 minutos y curva de puntaje
-  MPB en un quinto panel. Usa el modelo guardado de cada fold y dos
-  consultas BigQuery de 70 min, con *dry-run* por defecto.
-
-```bash
-python scripts/6_figures/6b_plot_mag_reconstruction_cases.py           # estimar consultas
-python scripts/6_figures/6b_plot_mag_reconstruction_cases.py --execute # dibujar
-```
-
-Salida: `results/metrics/mag_cv_full/figures/mag_cv_reconstruction_good_vs_bad.png`.
+Salida: `results/metrics/mag_cv_600windows_det10_mag1_pat20_ep1000/figures/`.
+Para elegir otro experimento, usar `--summary` (6a) o `--results-dir` (6b).
+Ver `scripts/6_figures/README.md`.
 
 ### Segundo entrenamiento MAG: 600 ventanas + detección priorizada
 
