@@ -1,3 +1,20 @@
+## Sexto modelo: salida temporal nativa y early stopping anticipado
+
+Se añadió una arquitectura temporal densa manteniendo el encoder residual del
+quinto modelo. Cada ventana MAG de 600 s ahora devuelve `s(t)` para cada
+muestra válida y utiliza una pérdida supervisada gaussiana en tiempos nativos.
+Al evaluar, se promedian puntajes de ventanas superpuestas en los instantes
+físicos correspondientes, sin remuestrear.
+
+Se habilita early stopping desde época **15** con paciencia **10** y se usan
+**40** centros rotativos por evento/época para asegurar 600 centros cubiertos
+antes de la primera época elegible. Se conservan 4 folds, datos reales, la
+caché MAG y checkpoints aislados.
+
+**Ver `docs/mag_sixth_training.md` para metodología y comandos.**
+
+---
+
 ## Quinto modelo MAG: encoder residual y datos MAG cacheados
 
 Nueva arquitectura experimental en `src/detection/mag_residual_transition_autoencoder.py`
