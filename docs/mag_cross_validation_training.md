@@ -1,3 +1,84 @@
+## Tercer entrenamiento MAG: pérdida física de |B|, paciencia 20, máximo 1000 épocas
+
+**Configuración actual de `scripts/5_training/run_mag_cv_full.sh`** (los apartados
+más abajo describen configuraciones históricas del primer y segundo entrenamiento):
+
+Se mantiene el encoder–decoder–detector de MAG, los 569 eventos catalogados,
+cuatro folds mensuales, normalizadores TRAIN-only, hasta 600 centros por evento,
+24 ventanas rotativas por evento y época, y `sigma=60 s`.
+
+Se agrega una penalización explícita de módulo magnético. Para cada instante
+válido se desnormalizan a **nT** las componentes reconstruidas y el módulo:
+
+```text
+B̂xyz(t) = [B̂x(t), B̂y(t), B̂z(t)]
+|B̂xyz(t)| = sqrt(B̂x(t)^2 + B̂y(t)^2 + B̂z(t)^2)
+B̂mag(t) = salida reconstruida del cuarto canal |B|
+Bmag(t) = |B| real observado
+```
+
+La pérdida de magnitud, promediada sobre los instantes observados
+(no sobre padding), es:
+
+```text
+L_mag = mean_t [ ((B̂mag - Bmag)^2 + (|B̂xyz| - Bmag)^2) / (2 σ²_mag,TRAIN) ]
+```
+
+`σ_mag,TRAIN` es la desviación estándar del módulo en el normalizador
+del fold de entrenamiento (no usa estadísticas de validación). Por lo tanto,
+`L_mag` carece de unidades y tiene una escala razonable respecto de
+`L_rec`, que ya compara los cuatro canales estandarizados.
+
+**Pérdida conjunta nueva:**
+
+```text
+L_total = L_rec + 10 * L_det + 1 * L_mag
+```
+
+El nuevo término exige (con una penalización, no una igualdad algebraica
+exacta) que tanto el canal reconstruido `|B|` como el módulo calculado
+a partir de las tres componentes reconstruidas concuerden con el módulo
+real. No se cambia la arquitectura ni se imponen pesos infinitos.
+
+- Máximo de épocas por fold: **1000** (antes 100).
+- Paciencia de early stopping: **20** (antes 10).
+- Mínimo de épocas: **25**, para cubrir al menos una rotación de los
+  600 objetivos gaussianos.
+- Criterio de selección del mejor modelo: **`val_det`** de los meses
+  internos de entrenamiento, igual que antes, para priorizar la localización.
+  La pérdida nueva `val_mag` también se calcula y registra para diagnóstico;
+  no sustituye al criterio de early stopping.
+- El número de épocas realmente ejecutadas puede ser muy inferior a 1000
+  si dejan de observarse mejoras en `val_det`.
+- Los archivos `fold_XX_metrics.json` incluyen `train_mag` y `val_mag`
+  por época, además de las métricas anteriores.
+
+**Los experimentos anteriores quedan intactos.** El tercer entrenamiento
+usa por defecto:
+
+```text
+results/metrics/mag_cv_600windows_det10_mag1_pat20_ep1000/
+```
+
+Comando desde la raíz del proyecto:
+
+```bash
+git pull origin main
+source .venv/bin/activate
+tmux new -s mag_cv_mag1
+bash scripts/5_training/run_mag_cv_full.sh
+```
+
+El launcher ejecuta las pruebas sin consultas a BigQuery, luego realiza
+la estimación de costo y consulta los mismos datos MAVEN reales si se
+superan correctamente las verificaciones. Para modificar el peso físico
+sin editar el código: `LAMBDA_MAGNITUDE=2 bash scripts/5_training/run_mag_cv_full.sh`
+(recomendado ajustar también `OUTPUT_DIR` para separar experimentos).
+Los nuevos checkpoints **no deben mezclarse ni reanudarse** desde una
+carpeta de experimentos anteriores.
+
+---
+
 ## Segundo entrenamiento MAG: 600 etiquetas gaussianas por evento + detección ponderada
 
 **Configuración nueva (sin modificar los resultados del experimento anterior):**
