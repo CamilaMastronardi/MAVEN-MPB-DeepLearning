@@ -28,7 +28,8 @@ python -m py_compile \
     src/data/mpb_weak_regions.py \
     src/data/mpb_dual_windows.py \
     src/detection/mag_swea_region_model.py \
-    scripts/5_training/5b_train_mag_swea_regions.py
+    scripts/5_training/5b_train_mag_swea_regions.py \
+    scripts/7_figures/7a_plot_mag_swea_results.py
 python -m unittest discover -s tests -v
 
 if [[ "$PILOT_EVENTS_PER_FOLD" != "0" ]]; then
@@ -69,3 +70,11 @@ python -u scripts/5_training/5b_train_mag_swea_regions.py \
     "${extra[@]}" \
     --output-dir "$OUTPUT_DIR" --resume --execute \
     2>&1 | tee -a "$OUTPUT_DIR/training.log"
+
+if [[ "$PILOT_EVENTS_PER_FOLD" == "0" ]]; then
+    python scripts/7_figures/7a_plot_mag_swea_results.py \
+        --results-dir "$OUTPUT_DIR" \
+        --compare-v5 results/metrics/mag_cv_residual_transition_v1
+else
+    echo "PILOT: figure analysis requires all four complete folds and is skipped."
+fi
