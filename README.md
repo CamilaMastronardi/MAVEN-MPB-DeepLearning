@@ -338,3 +338,27 @@ bash scripts/5_training/run_mag_cv_transition.sh
 Salida: `results/metrics/mag_cv_transition_v1/`. Se preservan los
 checkpoints del tercer experimento y los anteriores. Ver
 `docs/mag_cross_validation_training.md`.
+
+## Figuras del tercer entrenamiento MAG (sin reentrenar)
+
+Los scripts existentes de `scripts/6_figures/` utilizan ahora por defecto
+`results/metrics/mag_cv_600windows_det10_mag1_pat20_ep1000/`.
+
+```bash
+# Sin BigQuery: resumen CV por fold, train/monitor losses (rec/det/mag),
+# histograma y CDF de los 569 errores, y comparación con el segundo modelo:
+python scripts/6_figures/6a_plot_mag_cv_summary.py
+
+# Estima dos consultas BigQuery de 70 min, sin recuperar mediciones:
+python scripts/6_figures/6b_plot_mag_reconstruction_cases.py
+
+# Ejecuta solo esas dos consultas y crea dos reconstrucciones + score MPB:
+python scripts/6_figures/6b_plot_mag_reconstruction_cases.py --execute
+```
+
+En el panel del módulo de 6b también se dibuja la norma de las componentes
+MAG reconstruidas, y en el JSON acompañante se guardan tres RMSE en nT.
+Todas las figuras quedan en `results/metrics/mag_cv_600windows_det10_mag1_pat20_ep1000/figures/`.
+Los modelos y resultados de los entrenamientos previos y del cuarto
+entrenamiento en curso permanecen independientes. Ver
+`scripts/6_figures/README.md`.
