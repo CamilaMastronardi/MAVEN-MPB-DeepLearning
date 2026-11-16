@@ -162,3 +162,52 @@ python scripts/6_figures/6a_plot_mag_cv_summary.py \
 python scripts/6_figures/6b_plot_mag_reconstruction_cases.py \
   --results-dir results/metrics/mag_cv_residual_transition_v1 --execute
 ```
+
+### Análisis completo después del quinto entrenamiento
+
+Sin volver a entrenar ni consultar BigQuery, comparar los cuatro folds y
+los **mismos eventos** del cuarto y quinto modelo:
+
+```bash
+python scripts/6_figures/6a_plot_mag_cv_summary.py \
+  --summary results/metrics/mag_cv_residual_transition_v1/cv_summary.json \
+  --compare-to results/metrics/mag_cv_transition_v1/cv_summary.json
+```
+
+Se obtienen en `mag_cv_residual_transition_v1/figures/`:
+
+- `mag_cv_residual_transition_training.png` — errores medianos y MPB ≤60 s por fold
+- `mag_cv_training_losses.png` — pérdidas de reconstrucción/detección/módulo,
+  TRAIN versus monitor mensual interno de early stopping
+- `mag_cv_error_distribution.png` — histograma, CDF y mediana global exacta
+- `mag_cv_fourth_vs_fifth.png` — comparación agregada por fold
+- `mag_cv_paired_fourth_vs_fifth.png` — cuatro paneles:
+  error absoluto anterior/actual en los mismos eventos, histogramas de
+  cambios de error, curvas acumuladas y desplazamientos con signo de los
+  máximos predichos
+- `mag_cv_paired_fourth_vs_fifth.json` — métricas globales emparejadas,
+  cantidades de eventos mejorados/empeorados, MPB ganadas/perdidas en el
+  umbral de 60 s y máximos a ≥25 minutos del cruce anotado
+- `mag_cv_paired_fourth_vs_fifth.csv` — errores por evento, tiempo UTC,
+  fold y diferencias anterior/actual, para análisis posterior
+
+El emparejamiento requiere las **mismas etiquetas, grupos, folds y cantidad
+de ventanas evaluadas por MPB**; el script se detiene ante inconsistencias.
+No equivale a una prueba estadística de significación ni a una evaluación
+sobre órbitas sin cruces.
+
+El script `6b` ahora busca primero en la caché MAG local creada durante
+el quinto entrenamiento. Si encuentra los bloques de ±35 minutos
+correspondientes a los dos casos seleccionados, **no hace ni dry-run ni
+consulta a BigQuery**:
+
+```bash
+python scripts/6_figures/6b_plot_mag_reconstruction_cases.py \
+  --results-dir results/metrics/mag_cv_residual_transition_v1 --execute
+```
+
+Si alguno de los bloques falta, solo ese evento se consulta a BigQuery,
+respetando los límites configurados, y se agrega a la caché. Se puede
+indicar otra ubicación con `--mag-cache-dir` o desactivarla con
+`--no-mag-cache`. El flag `--execute` sigue siendo obligatorio para
+generar la figura, incluso si ambos eventos están cacheados.
