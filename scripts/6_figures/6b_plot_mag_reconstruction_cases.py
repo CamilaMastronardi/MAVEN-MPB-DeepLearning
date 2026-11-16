@@ -329,7 +329,7 @@ def plot_cases(cases, out):
     fig.text(
         0.5, 0.025,
         "Cada serie abarca 70 min. Reconstrucción: promedio de ventanas "
-        "solapadas de 10 min; las bandas no representan el espesor de la MPB.\\n"
+        "solapadas de 10 min; las bandas no representan el espesor de la MPB.\n"
         "El puntaje entre 0 y 1 indica cercanía a una MPB etiquetada; "
         "no es una probabilidad calibrada.",
         ha="center", fontsize=9
