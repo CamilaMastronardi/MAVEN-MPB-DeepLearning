@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Figure for the first full 4-fold MAG training, using saved CV metrics only.
+"""Figure for any full 4-fold MAG training, using saved CV metrics only.
 
 Reads cv_summary.json, not BigQuery. Does not hard-code measured results.
-Default input:  results/metrics/mag_cv_full/cv_summary.json
-Default output: results/metrics/mag_cv_full/figures/mag_cv_first_training.png
+Default input:  results/metrics/mag_cv_600windows_det10/cv_summary.json
+Default output: results/metrics/mag_cv_600windows_det10/figures/mag_cv_second_training.png
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ matplotlib.use("Agg")  # Render safely from WSL/tmux without a graphical display
 import matplotlib.pyplot as plt
 
 
-DEFAULT_RESULTS = Path("results/metrics/mag_cv_full")
+DEFAULT_RESULTS = Path("results/metrics/mag_cv_600windows_det10")
 
 
 def load_summary(path: Path):
@@ -49,7 +49,7 @@ def load_summary(path: Path):
     return ordered
 
 
-def make_figure(rows, output_path: Path):
+def make_figure(rows, output_path: Path, *, experiment_label: str):
     folds = [int(r["fold"]) for r in rows]
     medians_min = [float(r["median_abs_peak_error_s"]) / 60. for r in rows]
     successes_pct = [100. * float(r["fraction_within_60s"]) for r in rows]
@@ -96,7 +96,7 @@ def make_figure(rows, output_path: Path):
             textcoords="offset points", fontsize=9
         )
 
-    fig.suptitle("MAVEN MAG — primer entrenamiento, validación cruzada (4 folds)",
+    fig.suptitle(f"MAVEN MAG — {experiment_label}, validación cruzada (4 folds)",
                  fontsize=14, fontweight="bold")
     fig.supxlabel(
         f"Total: {n_total} MPB evaluadas  |  "
@@ -116,13 +116,23 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--summary", type=Path, default=DEFAULT_RESULTS / "cv_summary.json",
                         help="Ruta a cv_summary.json del entrenamiento MAG completo.")
-    parser.add_argument("--output", type=Path,
-                        default=DEFAULT_RESULTS / "figures/mag_cv_first_training.png",
-                        help="Ruta PNG de salida.")
+    parser.add_argument("--output", type=Path, default=None,
+                        help="Ruta PNG de salida. Por defecto junto al resumen elegido.")
     args = parser.parse_args()
 
     rows = load_summary(args.summary)
-    saved = make_figure(rows, args.output)
+    summary = json.loads(args.summary.read_text(encoding="utf-8"))
+    config = summary.get("training_configuration", {})
+    is_second = (
+        float(config.get("lambda_detection", 1.)) == 10.
+        and int(config.get("train_targets_per_event", 24)) == 600
+    )
+    name = "segundo entrenamiento" if is_second else "primer entrenamiento"
+    if args.output is None:
+        filename = ("mag_cv_second_training.png" if is_second
+                    else "mag_cv_first_training.png")
+        args.output = args.summary.parent / "figures" / filename
+    saved = make_figure(rows, args.output, experiment_label=name)
     print(f"Figura guardada en: {saved.resolve()}")
 
 
