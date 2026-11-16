@@ -415,11 +415,20 @@ def save_events_csv(path, rows):
         writer.writerows(rows)
 
 
-def train_fold(fold, selected, blocks, normalizer, run_sig, args, device):
+def train_fold(fold, selected, blocks, normalizer, run_sig, args, device,
+               all_manifest_rows):
     train = selected["train"]
     val = selected["val"]
-    training_labels = np.asarray([r["time"].timestamp() for r in train], dtype=float)
-    validation_labels = np.asarray([r["time"].timestamp() for r in val], dtype=float)
+    # Even in a small-event pilot, labels include ALL annotated events from
+    # the correct split, so an omitted nearby MPB is not treated as unknown.
+    training_labels = np.asarray([
+        r["time"].timestamp() for r in all_manifest_rows
+        if r["fold"] != fold and r["mag_available"] == "1"
+    ], dtype=float)
+    validation_labels = np.asarray([
+        r["time"].timestamp() for r in all_manifest_rows
+        if r["fold"] == fold and r["mag_available"] == "1"
+    ], dtype=float)
     print(f"\nFOLD {fold}: prepare {len(train)} TRAIN / {len(val)} VAL events.",
           flush=True)
 
@@ -544,7 +553,8 @@ def main():
     results = {}
     for fold in requested:
         metrics_file = args.output_dir / f"fold_{fold:02d}_metrics.json"
-        if args.resume and metrics_file.exists():
+        if (args.resume and metrics_file.exists() and
+                (args.output_dir / f"fold_{fold:02d}_final.pt").exists()):
             saved = json.loads(metrics_file.read_text(encoding="utf-8"))
             if saved.get("signature") != signatures[fold]:
                 raise RuntimeError("Existing fold metrics disagree with this run.")
@@ -569,7 +579,7 @@ def main():
         for fold in remaining:
             results[fold] = train_fold(
                 fold, selected[fold], blocks, normalizers[fold],
-                signatures[fold], args, device
+                signatures[fold], args, device, rows
             )
             # Existing data are held in RAM throughout the run so each
             # distinct selected event is fetched from BigQuery exactly once.
