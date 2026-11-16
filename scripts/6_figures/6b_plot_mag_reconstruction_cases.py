@@ -3,15 +3,16 @@
 
 A trained MAG model accepts 10-minute windows, NOT 70-minute inputs. This
 script uses the SAME number of spaced 10-minute windows as the saved outer-CV
-event evaluation (600 for the second, third and fourth trainings; 121 for
-the first). Each window has (1) reconstructed Bx/By/Bz/|B| and (2) a
-supervised MPB proximity score. Overlapping decoder outputs are averaged
-at original measurement timestamps to visualize the full 70-minute block.
+event evaluation (600 for experiments 2-6, 121 for the first). Each window
+has reconstructed Bx/By/Bz/|B|. Older architectures assign one score per
+window; the sixth dense temporal model assigns one score per native sample
+and overlapping scores are averaged on their original UTC timestamps.
+Overlapping decoder outputs are averaged on the same original time grid.
 
 Selects representative good (error <=60 s) and bad (error >=600 s) examples
 from saved per-event CV metrics, without retraining. Reads scientific MAG
 measurements only for the TWO selected events; BigQuery dry-run by default.
-A scalar score in [0,1] is NOT a calibrated MPB probability.
+A scalar or temporal score in [0,1] is NOT a calibrated MPB probability.
 """
 from __future__ import annotations
 
