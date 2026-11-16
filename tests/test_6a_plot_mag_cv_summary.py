@@ -66,5 +66,35 @@ class MagFiguresOfflineTests(unittest.TestCase):
             self.assertAlmostEqual(median, 480.)
 
 
+    def test_second_third_comparison_uses_identical_fold_counts(self):
+        with tempfile.TemporaryDirectory() as folder:
+            previous = [
+                {
+                    "fold": k,
+                    "val_evaluable_events": 5,
+                    "median_abs_peak_error_s": 800. + k,
+                    "fraction_within_60s": .05
+                } for k in range(1, 5)
+            ]
+            third = [
+                {
+                    "fold": k,
+                    "val_evaluable_events": 5,
+                    "median_abs_peak_error_s": 700. + k,
+                    "fraction_within_60s": .15
+                } for k in range(1, 5)
+            ]
+            path = figures.plot_fold_comparison(
+                third, previous, Path(folder) / "compare.png"
+            )
+            self.assertTrue(path.is_file())
+            previous[0]["val_evaluable_events"] = 6
+            with self.assertRaises(ValueError):
+                figures.plot_fold_comparison(
+                    third, previous, Path(folder) / "bad.png"
+                )
+
+
+
 if __name__ == "__main__":
     unittest.main()
