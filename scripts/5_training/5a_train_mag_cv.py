@@ -59,8 +59,11 @@ def parser():
     p.add_argument("--monitor-centers-per-event", type=int, default=21,
                    help="Number of fixed validation centers per event to check per epoch.")
     p.add_argument("--batch-size", type=int, default=16)
-    p.add_argument("--train-windows-per-event", type=int, default=24)
-    p.add_argument("--val-centers-per-event", type=int, default=121)
+    p.add_argument("--train-windows-per-event", type=int, default=600,
+                   help="Number of distinct native rolling-window targets per event.")
+    p.add_argument("--train-windows-per-epoch", type=int, default=24,
+                   help="Windows sampled from each event pool per epoch; cycles through pool.")
+    p.add_argument("--val-centers-per-event", type=int, default=600)
     p.add_argument("--max-train-events", type=int, default=0,
                    help="0 = ALL training events; >0 is a subset pilot.")
     p.add_argument("--max-val-events", type=int, default=0,
@@ -68,7 +71,7 @@ def parser():
     p.add_argument("--sigma-seconds", type=float, default=60.)
     p.add_argument("--near-radius-seconds", type=float, default=120.)
     p.add_argument("--near-label-weight", type=float, default=10.)
-    p.add_argument("--lambda-detection", type=float, default=1.)
+    p.add_argument("--lambda-detection", type=float, default=10.)
     p.add_argument("--learning-rate", type=float, default=1e-3)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--torch-threads", type=int, default=2)
@@ -84,7 +87,7 @@ def parser():
     a = p.parse_args()
     positive = [
         a.epochs, a.early_stop_patience, a.monitor_centers_per_event,
-        a.batch_size, a.train_windows_per_event,
+        a.batch_size, a.train_windows_per_event, a.train_windows_per_epoch,
         a.val_centers_per_event, a.sigma_seconds, a.near_radius_seconds,
         a.near_label_weight, a.learning_rate, a.max_query_gib,
         a.max_total_gib, a.max_returned_rows, a.torch_threads
@@ -96,6 +99,8 @@ def parser():
         p.error("Invalid subset counts or detection-loss multiplier.")
     if a.train_windows_per_event < 2:
         p.error("--train-windows-per-event must be >= 2.")
+    if a.train_windows_per_epoch > a.train_windows_per_event:
+        p.error("Per-epoch windows cannot exceed the stored target pool size.")
     return a
 
 
@@ -179,6 +184,7 @@ def signature(args, fold, train, val, normalizer_sha):
         "val_times": [r["time"].isoformat() for r in val],
         "epochs": args.epochs, "batch_size": args.batch_size,
         "train_windows_per_event": args.train_windows_per_event,
+        "train_windows_per_epoch": args.train_windows_per_epoch,
         "val_centers_per_event": args.val_centers_per_event,
         "sigma_seconds": args.sigma_seconds,
         "near_radius_seconds": args.near_radius_seconds,
@@ -349,14 +355,72 @@ def make_batch(windows, normalizer, device):
     )
 
 
-def training_epoch(model, optimizer, windows, normalizer, args, device, fold, epoch):
+def compact_event_pool(windows):
+    """Store the 600 Gaussian targets without keeping decoded 600-s arrays.
+
+    Each entry is (native_center, gaussian_label, signed_MPB_offset).
+    """
+    return np.asarray([
+        (w.center_s, w.detection_score, w.offset_from_nearest_mpb_s)
+        for w in windows
+    ], dtype=np.float64).reshape(-1, 3)
+
+
+def epoch_pool_indices(n, k, seed, epoch, count):
+    """Rotate over a deterministic permutation of all Gaussian targets.
+
+    Sampling 24 of 600 windows in each epoch avoids multiplying the CPU
+    cost of one epoch by 25. Over successive epochs, all available
+    targets are visited instead of permanently using the same 24.
+    """
+    if n < 1 or count < 1:
+        raise ValueError("Expected nonempty pool and positive sample count.")
+    rng = np.random.default_rng(seed + k * 101_003)
+    order = rng.permutation(n)
+    start = ((epoch - 1) * count) % n
+    return order[np.arange(start, start + min(count, n)) % n]
+
+
+def inflate_native_window(block, info):
+    """Rebuild one previously QC-approved native MAG window in RAM."""
+    times, values = block
+    center, target, offset = map(float, info)
+    left = int(np.searchsorted(times, center - WINDOW_S / 2, side="left"))
+    right = int(np.searchsorted(times, center + WINDOW_S / 2, side="right"))
+    if right - left < 3:
+        raise ValueError("Pool contains an invalid MAG window.")
+    relative = times[left:right] - center
+    if not np.any(np.abs(relative) < 0.51 * np.median(np.diff(times))):
+        raise ValueError("Pool center is not a native MAG measurement.")
+    return windowing.Window(
+        center_s=center,
+        data=values[left:right],
+        relative_times_s=relative,
+        detection_score=target,
+        offset_from_nearest_mpb_s=offset,
+    )
+
+
+def training_epoch(model, optimizer, event_pools, blocks, normalizer,
+                   args, device, fold, epoch):
+    # A window from each of the 600-element Gaussian target pools is chosen
+    # on a rotating schedule; real arrays are materialized only per batch.
+    tasks = []
+    for event_index, (event_time, pool) in enumerate(event_pools):
+        selected = epoch_pool_indices(
+            len(pool), event_index, args.seed + fold * 10000,
+            epoch, args.train_windows_per_epoch
+        )
+        tasks.extend((event_time, pool[int(k)]) for k in selected)
     rng = random.Random(args.seed + fold * 10000 + epoch)
-    order = list(range(len(windows)))
-    rng.shuffle(order)
+    rng.shuffle(tasks)
     model.train()
     total_rec = total_det = total_loss = steps = 0.
-    for pos in range(0, len(order), args.batch_size):
-        group = [windows[i] for i in order[pos:pos + args.batch_size]]
+    for pos in range(0, len(tasks), args.batch_size):
+        group = [
+            inflate_native_window(blocks[event_time], entry)
+            for event_time, entry in tasks[pos:pos + args.batch_size]
+        ]
         batch = make_batch(group, normalizer, device)
         optimizer.zero_grad(set_to_none=True)
         _, recon, pred = model(batch.x, batch.time_mask, batch.rel_time_s)
@@ -379,7 +443,8 @@ def training_epoch(model, optimizer, windows, normalizer, args, device, fold, ep
     return {"train_loss": total_loss/steps,
             "train_rec": total_rec/steps,
             "train_det": total_det/steps,
-            "train_batches": int(steps)}
+            "train_batches": int(steps),
+            "train_windows_seen_this_epoch": len(tasks)}
 
 
 @torch.no_grad()
@@ -537,21 +602,26 @@ def train_fold(fold, selected, blocks, normalizer, run_sig, args, device,
           f"{excluded_edges} excluded support overlaps.",
           flush=True)
 
-    training_windows = []
+    event_pools = []
     invalid_train = 0
     for row in fit_train:
         ws = event_windows(row, blocks, training_labels, args, train=True)
         if not ws:
             invalid_train += 1
-        training_windows.extend(ws)
-    if len(training_windows) < args.batch_size:
-        raise RuntimeError("Too few accepted training windows.")
+            continue
+        event_pools.append((row["time"], compact_event_pool(ws)))
+        # Free the larger arrays held by individual temporary Window objects.
+        del ws
+    train_pool_count = sum(len(pool) for _, pool in event_pools)
+    if train_pool_count < args.batch_size:
+        raise RuntimeError("Too few accepted training Gaussian targets.")
 
     val_windows = [
         (row, event_windows(row, blocks, validation_labels, args, train=False))
         for row in val
     ]
-    print(f"FOLD {fold}: {len(training_windows)} training windows; "
+    print(f"FOLD {fold}: {train_pool_count} Gaussian window targets "
+          f"in {len(event_pools)} training event pools; "
           f"{sum(len(ws) for _, ws in val_windows)} evaluation windows; "
           f"{invalid_train} unusable train events.", flush=True)
 
@@ -611,8 +681,8 @@ def train_fold(fold, selected, blocks, normalizer, run_sig, args, device,
             print(f"FOLD {fold}: previous checkpoint already met early "
                   "stopping; proceeding to final evaluation.", flush=True)
             break
-        stats = training_epoch(model, optimizer, training_windows, normalizer,
-                               args, device, fold, epoch)
+        stats = training_epoch(model, optimizer, event_pools, blocks,
+                               normalizer, args, device, fold, epoch)
         val_stats = evaluate_monitor(
             model, monitor_windows, normalizer, args, device
         )
@@ -672,7 +742,10 @@ def train_fold(fold, selected, blocks, normalizer, run_sig, args, device,
         "inner_monitor_events": len(inner_monitor),
         "train_events_excluded_support_overlap": excluded_edges,
         "train_events_unusable": invalid_train,
-        "train_windows": len(training_windows),
+        "train_windows": train_pool_count,
+        "train_windows_per_epoch": args.train_windows_per_epoch,
+        "lambda_detection": args.lambda_detection,
+        "sigma_seconds": args.sigma_seconds,
         "val_events_selected": len(val), "train_history": history,
         "pilot_subset": bool(args.max_train_events or args.max_val_events),
         **metrics,
