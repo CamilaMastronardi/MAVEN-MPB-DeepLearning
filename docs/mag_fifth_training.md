@@ -155,3 +155,32 @@ recall o F1 en órbitas sin cruces.
   modelos con arquitectura diferente.
 - Una red más profunda podría sobreajustar. El aumento de capacidad es
   una hipótesis a evaluar empíricamente, no una garantía de mejora.
+
+## Análisis completo posterior al quinto entrenamiento
+
+Una vez completados los cuatro folds, ejecutar (no reentrena y no usa
+BigQuery en el primer comando):
+
+```bash
+python scripts/6_figures/6a_plot_mag_cv_summary.py \
+  --summary results/metrics/mag_cv_residual_transition_v1/cv_summary.json \
+  --compare-to results/metrics/mag_cv_transition_v1/cv_summary.json
+
+python scripts/6_figures/6b_plot_mag_reconstruction_cases.py \
+  --results-dir results/metrics/mag_cv_residual_transition_v1 --execute
+```
+
+La primera línea compara exactamente los mismos eventos y genera un informe
+emparejado en PNG, JSON y CSV bajo `mag_cv_residual_transition_v1/figures/`
+(con prefijo `mag_cv_paired_fourth_vs_fifth`). El JSON cuantifica mejoras,
+empeoramientos, eventos ganados y perdidos al exigir ≤60 s, y frecuencia de
+picos cerca de ±30 min. Si faltan eventos o cambia el número de ventanas
+por MPB, se aborta en lugar de comparar conjuntos distintos.
+
+El script de reconstrucción reutiliza por defecto el caché raw MAG de
+`data/cache/mag_events/` generado al entrenar el quinto, evitando BigQuery
+si ambos intervalos de 70 minutos se encuentran completos y validados.
+Para cambiar la ubicación, pasar `--mag-cache-dir RUTA`.
+
+Enviar para revisión las figuras resultantes y el JSON emparejado: así se
+podrán interpretar las estadísticas completas y no solamente el fold 1.
