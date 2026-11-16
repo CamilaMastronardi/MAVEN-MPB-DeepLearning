@@ -41,6 +41,7 @@ windowing = import_module("scripts.3_windowing.3a_windowing")
 batching = import_module("scripts.4_preprocessing.4a_native_batches")
 trainer = import_module("scripts.5_training.5a_train_mag_cv")
 from src.detection.mag_autoencoder import MagSupervisedAutoencoder
+from src.detection.mag_transition_autoencoder import MagTransitionAutoencoder
 
 DEFAULT_RESULTS = Path("results/metrics/mag_cv_600windows_det10")
 DEFAULT_NORMALIZERS = Path("results/metrics/fold_normalization")
@@ -171,11 +172,22 @@ def load_model_and_normalizer(fold, args, manifest_rows):
     if state.get("fold") != fold:
         raise ValueError("Checkpoint fold disagrees with the annotated event.")
     config = state.get("config", {})
-    model = MagSupervisedAutoencoder(
-        hidden=int(config.get("hidden", 16)),
-        latent_channels=int(config.get("latent_channels", 2)),
-        pooling_sigma_s=float(config.get("pooling_sigma_s", 90.0)),
-    )
+    architecture = config.get("architecture", "baseline")
+    shared = {
+        "hidden": int(config.get("hidden", 16)),
+        "latent_channels": int(config.get("latent_channels", 2)),
+        "pooling_sigma_s": float(config.get("pooling_sigma_s", 90.0)),
+    }
+    if architecture == "baseline":
+        model = MagSupervisedAutoencoder(**shared)
+    elif architecture == "transition":
+        model = MagTransitionAutoencoder(
+            **shared,
+            side_offset_s=float(config["transition_side_offset_s"]),
+            center_exclusion_s=float(config["transition_center_exclusion_s"]),
+        )
+    else:
+        raise ValueError(f"Unknown saved MAG detector architecture: {architecture}")
     model.load_state_dict(state["model"], strict=True)
     model.eval()
     return model, normalizer, state.get("best_epoch")
