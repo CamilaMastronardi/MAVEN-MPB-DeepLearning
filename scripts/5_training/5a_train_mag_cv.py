@@ -188,8 +188,48 @@ def signature(args, fold, train, val, normalizer_sha):
         "early_stop_patience": args.early_stop_patience,
         "early_stop_min_delta": args.early_stop_min_delta,
         "monitor_centers_per_event": args.monitor_centers_per_event,
+        "inner_month_holdout_fraction": 0.10,
     }
     return hashlib.sha256(json.dumps(cfg, sort_keys=True).encode()).hexdigest()
+
+
+def split_inner_monitor_months(train, fold, seed):
+    """Keep OUTER validation independent of early stopping.
+
+    Hold out ~10% of training months for early-stop monitoring. Neighboring
+    TRAIN event supports that overlap an inner-monitor support are removed
+    from gradient training (never moved to outer validation).
+    Normalizer was fit on the three outer-TRAIN folds, including these
+    inner-monitor months; it remains independent of OUTER validation.
+    """
+    from bisect import bisect_left
+    months = sorted({r["month_block"] for r in train})
+    if len(months) < 2:
+        raise ValueError("Need >=2 different TRAIN month blocks for inner holdout.")
+    rng = random.Random(seed + fold * 191)
+    rng.shuffle(months)
+    count = max(1, min(len(months)-1, round(0.10 * len(months))))
+    held = set(months[:count])
+    inner = [r for r in train if r["month_block"] in held]
+    fit = [r for r in train if r["month_block"] not in held]
+    if not inner or not fit:
+        raise ValueError("Inner-month split produced an empty group.")
+
+    held_times = sorted(r["time"].timestamp() for r in inner)
+    safe_fit = []
+    excluded_edges = 0
+    for row in fit:
+        t = row["time"].timestamp()
+        j = bisect_left(held_times, t)
+        neighbors = held_times[max(0, j-1):j+1]
+        if any(abs(t - v) <= 2 * SUPPORT_MINUTES * 60 for v in neighbors):
+            excluded_edges += 1
+        else:
+            safe_fit.append(row)
+    check_disjoint_supports(safe_fit, inner)
+    if not safe_fit:
+        raise ValueError("No disjoint TRAIN events after inner-month holdout.")
+    return safe_fit, inner, excluded_edges
 
 
 def event_plan(row):
@@ -479,6 +519,9 @@ def train_fold(fold, selected, blocks, normalizer, run_sig, args, device,
                all_manifest_rows):
     train = selected["train"]
     val = selected["val"]
+    fit_train, inner_monitor, excluded_edges = split_inner_monitor_months(
+        train, fold, args.seed
+    )
     # Even in a small-event pilot, labels include ALL annotated events from
     # the correct split, so an omitted nearby MPB is not treated as unknown.
     training_labels = np.asarray([
@@ -489,12 +532,14 @@ def train_fold(fold, selected, blocks, normalizer, run_sig, args, device,
         r["time"].timestamp() for r in all_manifest_rows
         if r["fold"] == fold and r["mag_available"] == "1"
     ], dtype=float)
-    print(f"\nFOLD {fold}: prepare {len(train)} TRAIN / {len(val)} VAL events.",
+    print(f"\nFOLD {fold}: {len(fit_train)} gradient TRAIN, "
+          f"{len(inner_monitor)} inner-monitor, {len(val)} OUTER VAL events; "
+          f"{excluded_edges} excluded support overlaps.",
           flush=True)
 
     training_windows = []
     invalid_train = 0
-    for row in train:
+    for row in fit_train:
         ws = event_windows(row, blocks, training_labels, args, train=True)
         if not ws:
             invalid_train += 1
@@ -526,9 +571,16 @@ def train_fold(fold, selected, blocks, normalizer, run_sig, args, device,
     best_val = float("inf")
     best_epoch = 0
     stale_epochs = 0
-    monitor_windows = monitoring_windows(val_windows, args.monitor_centers_per_event)
+    inner_windows = [
+        (row, event_windows(row, blocks, training_labels, args, train=False))
+        for row in inner_monitor
+    ]
+    monitor_windows = monitoring_windows(
+        inner_windows, args.monitor_centers_per_event
+    )
     print(f"FOLD {fold}: early stopping monitors {len(monitor_windows)} "
-          f"fixed held-out windows from ALL evaluable VAL events.", flush=True)
+          f"fixed windows from inner TRAIN-month holdout events; "
+          f"OUTER VAL untouched until final evaluation.", flush=True)
     if not monitor_windows:
         raise ValueError("No validation windows available to monitor.")
 
@@ -610,6 +662,9 @@ def train_fold(fold, selected, blocks, normalizer, run_sig, args, device,
         "best_epoch": best_epoch, "best_monitor_val_det": best_val,
         "early_stopped": stale_epochs >= args.early_stop_patience,
         "train_events_selected": len(train),
+        "train_events_used_for_gradients": len(fit_train),
+        "inner_monitor_events": len(inner_monitor),
+        "train_events_excluded_support_overlap": excluded_edges,
         "train_events_unusable": invalid_train,
         "train_windows": len(training_windows),
         "val_events_selected": len(val), "train_history": history,
@@ -652,6 +707,8 @@ def main():
         train = choose_events(rows, fold, True, args.max_train_events, args.seed)
         val = choose_events(rows, fold, False, args.max_val_events, args.seed)
         check_disjoint_supports(train, val)
+        # Verify inner month holdout and disjoint supports before billable queries.
+        split_inner_monitor_months(train, fold, args.seed)
         normalizer, normalizer_sha = fold_normalizer(
             args.normalizers_dir / f"fold_{fold:02d}_mag_normalizer.json",
             args.manifest, rows, fold
