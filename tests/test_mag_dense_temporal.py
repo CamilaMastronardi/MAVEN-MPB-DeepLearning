@@ -69,6 +69,18 @@ class DenseTemporalTests(unittest.TestCase):
         self.assertAlmostEqual(float(delta[0, 0, 2]), 6., places=6)
         self.assertEqual(float(features[0, :, -1].abs().sum()), 0.)
 
+    def test_invalid_native_time_order_or_internal_mask_hole_rejected(self):
+        model = MagDenseTemporalAutoencoder()
+        z = torch.zeros((1, 8, 5))
+        times = torch.tensor([[-2., -1., 0., 1., 2.]])
+        hole = torch.tensor([[True, False, True, True, False]])
+        with self.assertRaisesRegex(ValueError, "valid prefixes"):
+            model.temporal_transition_features(z, hole, times)
+        reordered = torch.tensor([[-2., -1., 0., 0., 2.]])
+        all_valid = torch.ones((1, 5), dtype=torch.bool)
+        with self.assertRaisesRegex(ValueError, "strictly increasing"):
+            model.temporal_transition_features(z, all_valid, reordered)
+
     def test_dense_target_uses_absolute_time_to_annotation(self):
         times = torch.tensor([[-60., 0., 60., 0.]])
         mask = torch.tensor([[True, True, True, False]])
