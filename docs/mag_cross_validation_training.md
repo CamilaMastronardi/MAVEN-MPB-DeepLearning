@@ -13,8 +13,9 @@ bash scripts/5_training/run_mag_cv_full.sh
 ```
 
 Por defecto utiliza los cuatro folds, **todos los eventos train/val**,
-`--max-train-events 0 --max-val-events 0`, 10 épocas fijas por fold,
-checkpoints al terminar cada época y un límite total de **150 GiB
+`--max-train-events 0 --max-val-events 0`, un **máximo de 100 épocas por fold**,
+**early stopping con paciencia 10** y checkpoints tras cada época, más
+un límite total de **150 GiB
 estimados** para las consultas BigQuery de todos los eventos distintos.
 Realiza las pruebas offline y el preflight de las consultas *antes de*
 descargar cualquier medición. Si el costo estimado supera el límite,
@@ -39,9 +40,9 @@ Si se interrumpe, el launcher reanuda los checkpoints, pero debe
 **volver a consultar los bloques de MAVEN** que estaban sólo en RAM.
 
 **Advertencia metodológica:** trabajar con todos los eventos
-no significa que el modelo esté optimizado. Las 10 épocas y el muestreo
-de 24 ventanas de entrenamiento y 121 centros de validación por evento
-son elecciones iniciales fijas. Los resultados evalúan localización
+no significa que el modelo esté optimizado. El máximo de 100 épocas,
+la paciencia de 10 y el muestreo de 24 ventanas de entrenamiento y 121
+centros de validación por evento son elecciones metodológicas iniciales. Los resultados evalúan localización
 del pico **condicionada a MPB conocida**, no tasa de falsos positivos
 en trayectorias sin cruce. No son métricas finales de detección general.
 
@@ -76,8 +77,19 @@ notebook `01_mag_autoencoder.ipynb`. No se usan mediciones artificiales.
 
 El código consulta cada bloque de evento **una sola vez en la ejecución** y
 lo conserva en RAM para los 4 folds; no crea Parquet/CSV/NPZ con mediciones
-científicas. La validación se aplica después de las épocas predefinidas, sin
-ajustar el modelo con el fold de validación.
+científicas. Cada fold externo reserva su VALIDATION hasta el final. Dentro de los otros
+tres folds se separa aproximadamente el **10% de los meses** como
+subconjunto de monitorización interna: no reciben gradientes y sus
+mediciones no se solapan con los bloques de entrenamiento usados para
+actualizar pesos. El normalizador externo ya calculado sobre los tres
+folds de TRAIN se mantiene congelado (incluye los meses internos, pero
+**nunca** incluye el fold de validación externo).
+
+Cada época compara la pérdida supervisada en hasta 21 centros por evento
+del subconjunto interno. Se guarda `fold_XX_best.pt` cuando mejora al
+menos 0,0001 y se detiene cuando transcurren 10 épocas consecutivas sin
+mejora. Solo después se evalúa una única vez el fold de validación externo,
+utilizando los pesos del mejor checkpoint interno.
 
 ## Primera ejecución recomendada: piloto de 4 folds con datos reales
 
@@ -157,6 +169,7 @@ requiere volver a consultar los bloques de MAVEN.
 Se guardan SOLO pesos del modelo, estado de AdamW y estadísticas pequeñas:
 
 - `results/metrics/mag_cv/fold_01_last.pt`: checkpoint de última época.
+- `results/metrics/mag_cv/fold_01_best.pt`: mejor modelo según validación interna.
 - `results/metrics/mag_cv/fold_01_final.pt`: pesos finales del fold.
 - `results/metrics/mag_cv/fold_01_metrics.json`: historial de pérdidas y
   resumen de localización de MPB en VAL.
