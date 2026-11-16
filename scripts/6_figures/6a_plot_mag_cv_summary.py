@@ -261,8 +261,10 @@ def plot_event_error_distribution(errors, output_path: Path):
 
 
 
-def plot_fold_comparison(current, previous, path: Path):
-    """Same-fold 600-center CV comparison of third vs second training."""
+def plot_fold_comparison(current, previous, path: Path, *,
+                         current_label="Tercer entrenamiento",
+                         previous_label=previous_label):
+    """Same-fold, same-sample-resolution CV comparison of MAG experiments."""
     if [int(r["fold"]) for r in current] != [int(r["fold"]) for r in previous]:
         raise ValueError("Comparison requires identical fold ordering.")
     for a, b in zip(current, previous):
@@ -283,7 +285,7 @@ def plot_fold_comparison(current, previous, path: Path):
         bars_old = ax.bar(x - 0.19, old, width=0.38,
                           label="Segundo entrenamiento")
         bars_new = ax.bar(x + 0.19, new, width=0.38,
-                          label="Tercer entrenamiento")
+                          label=current_label)
         ax.set_xticks(x, [f"Fold {fold}" for fold in folds])
         ax.set_ylabel(label)
         ax.set_ylim(0, max(old + new) * 1.20)
@@ -300,11 +302,11 @@ def plot_fold_comparison(current, previous, path: Path):
                         ha="center", va="bottom", fontsize=8,
                         xytext=(0, 4), textcoords="offset points")
     axes[0].legend(loc="upper right", fontsize=8)
-    fig.suptitle("MAG — segundo vs tercer entrenamiento (misma CV)",
+    fig.suptitle(f"MAG — {previous_label} vs {current_label}",
                  fontsize=14, fontweight="bold")
     fig.supxlabel(
-        "Ambos experimentos evaluaron 600 centros por MPB y los mismos folds. "
-        "Se modificaron la pérdida y el criterio de entrenamiento.",
+        "Comparación con igual resolución de centros y mismos folds. "
+        "Las diferencias pueden deberse a múltiples cambios de entrenamiento.",
         fontsize=9
     )
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -355,6 +357,11 @@ def main():
             histories, figures_dir / "mag_cv_training_losses.png"
         )
         errors = read_event_errors(args.summary.parent)
+        expected_events = sum(int(row["val_evaluable_events"]) for row in rows)
+        if sum(len(v) for v in errors.values()) != expected_events:
+            raise ValueError(
+                "Inconsistent CV summary and event CSV counts; refusing plots."
+            )
         distribution, median_s, n_accurate, n_total = plot_event_error_distribution(
             errors, figures_dir / "mag_cv_error_distribution.png"
         )
@@ -375,8 +382,25 @@ def main():
                 print(f"Comparación omitida: no existe {prior}.")
             else:
                 earlier = load_summary(prior)
+                earlier_config = json.loads(
+                    prior.read_text(encoding="utf-8")
+                ).get("training_configuration", {})
+                centers_current = int(config.get("val_centers_per_event", 121))
+                centers_previous = int(
+                    earlier_config.get("val_centers_per_event", 121)
+                )
+                if centers_current != centers_previous:
+                    raise ValueError(
+                        "Comparison requires identical validation-center counts; "
+                        f"found {centers_current} vs {centers_previous}."
+                    )
+                previous_name = ("Segundo entrenamiento"
+                                 if prior.parent.name == "mag_cv_600windows_det10"
+                                 else prior.parent.name)
                 compared = plot_fold_comparison(
-                    rows, earlier, figures_dir / "mag_cv_second_vs_third.png"
+                    rows, earlier, figures_dir / "mag_cv_second_vs_third.png",
+                    current_label=name,
+                    previous_label=previous_name,
                 )
                 print(f"Comparación 2º vs 3º: {compared.resolve()}")
 
