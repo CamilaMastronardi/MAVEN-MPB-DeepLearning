@@ -398,8 +398,10 @@ def inflate_native_window(block, info):
     if right - left < 3:
         raise ValueError("Pool contains an invalid MAG window.")
     relative = times[left:right] - center
-    if not np.any(np.abs(relative) < 0.51 * np.median(np.diff(times))):
-        raise ValueError("Pool center is not a native MAG measurement.")
+    center_index = int(np.searchsorted(times, center, side="left"))
+    if (center_index >= len(times) or
+            abs(float(times[center_index]) - center) > 1e-3):
+        raise ValueError("Pool center is not a native MAG timestamp.")
     return windowing.Window(
         center_s=center,
         data=values[left:right],
