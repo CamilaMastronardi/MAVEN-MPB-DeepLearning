@@ -333,7 +333,10 @@ def main():
     rows = load_summary(args.summary)
     summary = json.loads(args.summary.read_text(encoding="utf-8"))
     config = summary.get("training_configuration", {})
-    if config.get("architecture") == "transition":
+    if config.get("architecture") == "residual-transition":
+        name = "quinto entrenamiento: encoder residual y detector de transiciones"
+        filename = "mag_cv_residual_transition_training.png"
+    elif config.get("architecture") == "transition":
         name = "cuarto entrenamiento: detector de transiciones"
         filename = "mag_cv_transition_training.png"
     elif float(config.get("lambda_magnitude", 0.)) > 0.:
