@@ -123,14 +123,20 @@ def main():
     rows = load_summary(args.summary)
     summary = json.loads(args.summary.read_text(encoding="utf-8"))
     config = summary.get("training_configuration", {})
-    is_second = (
-        float(config.get("lambda_detection", 1.)) == 10.
-        and int(config.get("train_targets_per_event", 24)) == 600
-    )
-    name = "segundo entrenamiento" if is_second else "primer entrenamiento"
+    if config.get("architecture") == "transition":
+        name = "cuarto entrenamiento: detector de transiciones"
+        filename = "mag_cv_transition_training.png"
+    elif float(config.get("lambda_magnitude", 0.)) > 0.:
+        name = "tercer entrenamiento: regularización del módulo"
+        filename = "mag_cv_third_training.png"
+    elif (float(config.get("lambda_detection", 1.)) == 10.
+          and int(config.get("train_targets_per_event", 24)) == 600):
+        name = "segundo entrenamiento"
+        filename = "mag_cv_second_training.png"
+    else:
+        name = "primer entrenamiento"
+        filename = "mag_cv_first_training.png"
     if args.output is None:
-        filename = ("mag_cv_second_training.png" if is_second
-                    else "mag_cv_first_training.png")
         args.output = args.summary.parent / "figures" / filename
     saved = make_figure(rows, args.output, experiment_label=name)
     print(f"Figura guardada en: {saved.resolve()}")
