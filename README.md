@@ -316,3 +316,25 @@ bash scripts/5_training/run_mag_cv_full.sh
 ```
 
 Detalles en `docs/mag_cross_validation_training.md`.
+
+## Cuarto experimento MAG — detector temporal antes/después (arquitectura 1/3)
+
+Se añadió `src/detection/mag_transition_autoencoder.py`: usa el mismo encoder
+CNN de dos canales latentes y el mismo decoder del tercer experimento, pero
+cambia las entradas del detector a cuatro resúmenes `[centro, antes, después,
+después-antes]`. Los promedios temporales laterales se calculan alrededor
+de ±120 s, excluyendo ±15 s del centro y el padding, siempre en segundos
+físicos de MAVEN. Se mantienen la pérdida `L_rec + 10 L_det + L_mag`, la
+validación cruzada de cuatro folds, máximo 1000 épocas y paciencia 20.
+
+**No interrumpir el tercer entrenamiento para probar este cuarto**. El
+launcher original `run_mag_cv_full.sh` mantiene la arquitectura anterior.
+Cuando termine, lanzar por separado:
+
+```bash
+bash scripts/5_training/run_mag_cv_transition.sh
+```
+
+Salida: `results/metrics/mag_cv_transition_v1/`. Se preservan los
+checkpoints del tercer experimento y los anteriores. Ver
+`docs/mag_cross_validation_training.md`.
