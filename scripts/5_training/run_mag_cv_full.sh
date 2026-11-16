@@ -25,7 +25,7 @@ MAX_TOTAL_GIB="${MAX_TOTAL_GIB:-150}"
 OUTPUT_DIR="${OUTPUT_DIR:-results/metrics/mag_cv_600windows_det10_mag1_pat20_ep1000}"
 
 echo "Checking MAG training syntax and offline tests before querying BigQuery..."
-python -m py_compile src/detection/mag_autoencoder.py scripts/5_training/5a_train_mag_cv.py
+python -m py_compile src/detection/mag_autoencoder.py scripts/4_preprocessing/4a_native_batches.py scripts/5_training/5a_train_mag_cv.py
 python -m unittest discover -s tests -v
 
 mkdir -p "$OUTPUT_DIR"
