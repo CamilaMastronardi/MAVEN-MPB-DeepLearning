@@ -16,7 +16,9 @@
   600 ventanas por evento**, recorriendo una permutación reproducible y
   distinta en cada evento. En **25 épocas** se recorren las 600
   etiquetas cuando existen todas. Por eso `--min-epochs=25` impide que
-  early stopping termine antes.
+  early stopping termine antes y **solo permite elegir el mejor checkpoint
+  desde la época 25**: así los pesos seleccionados también han sido
+  entrenados con una rotación completa.
 - Validación externa: hasta **600 centros** por evento (antes 121). Los
   intervalos de observación y etiquetas de MPB siguen siendo los mismos.
 - Función objetivo: `L = L_rec + 10 * L_det` (antes `L_rec + 1 * L_det`).
