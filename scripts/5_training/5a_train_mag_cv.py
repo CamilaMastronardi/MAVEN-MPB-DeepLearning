@@ -54,6 +54,8 @@ def parser():
     p.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)
     p.add_argument("--folds", choices=("all", "1", "2", "3", "4"), default="all")
     p.add_argument("--epochs", type=int, default=100)
+    p.add_argument("--min-epochs", type=int, default=25,
+                   help="Complete a full rotation of 600 targets at 24 per epoch.")
     p.add_argument("--early-stop-patience", type=int, default=10)
     p.add_argument("--early-stop-min-delta", type=float, default=1e-4)
     p.add_argument("--monitor-centers-per-event", type=int, default=21,
@@ -86,7 +88,7 @@ def parser():
                    help="Actually read MAVEN and train. Default is estimate only.")
     a = p.parse_args()
     positive = [
-        a.epochs, a.early_stop_patience, a.monitor_centers_per_event,
+        a.epochs, a.min_epochs, a.early_stop_patience, a.monitor_centers_per_event,
         a.batch_size, a.train_windows_per_event, a.train_windows_per_epoch,
         a.val_centers_per_event, a.sigma_seconds, a.near_radius_seconds,
         a.near_label_weight, a.learning_rate, a.max_query_gib,
@@ -101,6 +103,11 @@ def parser():
         p.error("--train-windows-per-event must be >= 2.")
     if a.train_windows_per_epoch > a.train_windows_per_event:
         p.error("Per-epoch windows cannot exceed the stored target pool size.")
+    coverage_epochs = int(np.ceil(a.train_windows_per_event / a.train_windows_per_epoch))
+    if a.min_epochs < coverage_epochs:
+        p.error(f"--min-epochs must be >= {coverage_epochs} to use every target.")
+    if a.min_epochs > a.epochs:
+        p.error("--min-epochs cannot exceed --epochs.")
     return a
 
 
@@ -182,7 +189,8 @@ def signature(args, fold, train, val, normalizer_sha):
         "manifest_sha256": hashlib.sha256(args.manifest.read_bytes()).hexdigest(),
         "train_times": [r["time"].isoformat() for r in train],
         "val_times": [r["time"].isoformat() for r in val],
-        "epochs": args.epochs, "batch_size": args.batch_size,
+        "epochs": args.epochs, "min_epochs": args.min_epochs,
+        "batch_size": args.batch_size,
         "train_windows_per_event": args.train_windows_per_event,
         "train_windows_per_epoch": args.train_windows_per_epoch,
         "val_centers_per_event": args.val_centers_per_event,
@@ -677,7 +685,8 @@ def train_fold(fold, selected, blocks, normalizer, run_sig, args, device,
     for epoch in range(start_epoch+1, args.epochs+1):
         # If the previous process stopped after an early-stop checkpoint but
         # before the final outer-fold evaluation, do not train extra epochs.
-        if stale_epochs >= args.early_stop_patience:
+        if (stale_epochs >= args.early_stop_patience and
+                epoch >= args.min_epochs):
             print(f"FOLD {fold}: previous checkpoint already met early "
                   "stopping; proceeding to final evaluation.", flush=True)
             break
@@ -717,7 +726,7 @@ def train_fold(fold, selected, blocks, normalizer, run_sig, args, device,
               f"val_rec={val_stats['val_rec']:.5f} "
               f"best_epoch={best_epoch} stale={stale_epochs}",
               flush=True)
-        if stale_epochs >= args.early_stop_patience:
+        if stale_epochs >= args.early_stop_patience and epoch >= args.min_epochs:
             print(f"FOLD {fold}: early stopping after {epoch} epochs "
                   f"(best epoch {best_epoch}).", flush=True)
             break
@@ -734,9 +743,11 @@ def train_fold(fold, selected, blocks, normalizer, run_sig, args, device,
     metrics, event_rows = validate_fold(model, val_windows, normalizer, args, device)
     result = {
         "schema": 1, "fold": fold, "signature": run_sig,
-        "epochs_max": args.epochs, "epochs_completed": len(history),
+        "epochs_max": args.epochs, "epochs_min": args.min_epochs,
+        "epochs_completed": len(history),
         "best_epoch": best_epoch, "best_monitor_val_det": best_val,
-        "early_stopped": stale_epochs >= args.early_stop_patience,
+        "early_stopped": (stale_epochs >= args.early_stop_patience and
+                          len(history) >= args.min_epochs),
         "train_events_selected": len(train),
         "train_events_used_for_gradients": len(fit_train),
         "inner_monitor_events": len(inner_monitor),
