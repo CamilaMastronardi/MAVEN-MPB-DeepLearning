@@ -248,3 +248,16 @@ incrementally after inspecting real windows. See [notebook instructions](noteboo
 ## Status
 
 All four annotation groups are integrated. Timestamp coverage has been measured for 569 MAG and 559 SWEA events. The first BigQuery-only pilot ran successfully for MAG and SWEA without persisting scientific data. The **30–100 eV** SWEA band has been verified in real data (11 selected channels for the pilot event). Cross-validation event splits (4 monthly-grouped folds) have been created and versioned; no model training results are claimed. Both single-event train/validation normalization pilots have run successfully for MAG and SWEA. Next: execute the resumable full-fold normalization step 4c, then construct mask-aware CNN architectures and cautious label sampling.
+
+## Primer entrenamiento real de MAG con 4 folds
+
+Se añadió `src/detection/mag_autoencoder.py` como definición compartida
+entre el notebook MAG y `scripts/5_training/5a_train_mag_cv.py`.
+El script ofrece validación cruzada mensual, normalizadores globales TRAIN-only,
+uso de datos MAVEN reales en RAM, estimación de costos BigQuery previa a
+consultar, checkpoints por época y métricas de error temporal por cruce.
+El entrenamiento **no se ejecuta automáticamente**: requiere `--execute`.
+
+Comenzar con un **piloto restringido** en los cuatro folds y no interpretar
+estos resultados como validación completa. Ver
+[guía de entrenamiento MAG](docs/mag_cross_validation_training.md).
