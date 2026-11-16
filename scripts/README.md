@@ -76,3 +76,7 @@ python -u scripts/5_training/5a_train_mag_cv.py --folds all --epochs 3 --max-tra
 
 El piloto **no es la validación completa**. Para metodología, gastos estimados,
 reanudación y métricas de localización, ver `docs/mag_cross_validation_training.md`.
+
+**Inicio nocturno en tmux con un único comando:**
+`bash scripts/5_training/run_mag_cv_pilot.sh`. Este runner ejecuta las
+pruebas offline antes de consultar BigQuery y conserva logs/checkpoints.
