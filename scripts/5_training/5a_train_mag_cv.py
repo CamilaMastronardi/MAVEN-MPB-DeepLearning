@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Train the REAL-MAVEN supervised MAG autoencoder on 4 held-out-month CV folds.
 
-No synthetic inputs or cached measurement files. The program preflights bounded
-BigQuery MAG event queries, fetches each distinct selected event ONCE into RAM,
+No synthetic inputs. The program preflights bounded BigQuery MAG queries
+for uncached events and optionally persists original measurements locally.
+Each selected event is loaded ONCE into RAM,
 fits only model weights (never train/val normalization), runs fixed-epoch CV,
 and saves only model checkpoints plus small event-level metrics.
 
@@ -38,6 +39,8 @@ batching = import_module("scripts.4_preprocessing.4a_native_batches")
 fitter = import_module("scripts.4_preprocessing.4c_fit_fold_normalizers")
 from src.detection.mag_autoencoder import MagSupervisedAutoencoder
 from src.detection.mag_transition_autoencoder import MagTransitionAutoencoder
+from src.detection.mag_residual_transition_autoencoder import MagResidualTransitionAutoencoder
+from src.data.mag_event_cache import MagEventCache
 
 DEFAULT_MANIFEST = Path("data/splits/cv4_monthly_manifest.csv")
 DEFAULT_NORMALIZERS = Path("results/metrics/fold_normalization")
@@ -54,9 +57,10 @@ def parser():
     p.add_argument("--normalizers-dir", type=Path, default=DEFAULT_NORMALIZERS)
     p.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)
     p.add_argument("--folds", choices=("all", "1", "2", "3", "4"), default="all")
-    p.add_argument("--architecture", choices=("baseline", "transition"),
+    p.add_argument("--architecture",
+                   choices=("baseline", "transition", "residual-transition"),
                    default="baseline",
-                   help="Baseline v1 or asymmetric before/after transition detector.")
+                   help="Baseline, v4 transition head, or v5 deeper residual transition encoder.")
     p.add_argument("--transition-side-offset-s", type=float, default=120.,
                    help="Before/after pooling lobes centered at +/- this many seconds.")
     p.add_argument("--transition-center-exclusion-s", type=float, default=15.,
@@ -91,6 +95,10 @@ def parser():
     p.add_argument("--max-total-gib", type=float, default=20.,
                    help="Hard bound on sum of dry-run estimated bytes in this run.")
     p.add_argument("--max-returned-rows", type=int, default=25000)
+    p.add_argument("--mag-cache-dir", type=Path, default=None,
+                   help="Optional persistent local cache of original MAG epochs.")
+    p.add_argument("--refresh-mag-cache", action="store_true",
+                   help="Force query/update of all selected events in MAG cache.")
     p.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
     p.add_argument("--resume", action="store_true",
                    help="Resume from previous completed epoch; reloads MAVEN into RAM.")
@@ -110,10 +118,12 @@ def parser():
     if (a.max_train_events < 0 or a.max_val_events < 0
             or a.lambda_detection < 0 or a.early_stop_min_delta < 0):
         p.error("Invalid subset counts or detection-loss multiplier.")
-    if (a.architecture == "transition"
+    if (a.architecture in ("transition", "residual-transition")
             and not (0 <= a.transition_center_exclusion_s
                      < a.transition_side_offset_s)):
         p.error("Transition model requires 0 <= center exclusion < side offset.")
+    if a.refresh_mag_cache and a.mag_cache_dir is None:
+        p.error("--refresh-mag-cache requires --mag-cache-dir.")
     if a.train_windows_per_event < 2:
         p.error("--train-windows-per-event must be >= 2.")
     if a.train_windows_per_epoch > a.train_windows_per_event:
@@ -221,10 +231,15 @@ def signature(args, fold, train, val, normalizer_sha):
         "inner_month_holdout_fraction": 0.10,
     }
     # Preserve the *exact* original signature for in-progress baseline folds.
-    if args.architecture == "transition":
-        cfg["architecture"] = "MAG-CNN-latent2-before-after-v1"
+    if args.architecture in ("transition", "residual-transition"):
+        if args.architecture == "transition":
+            cfg["architecture"] = "MAG-CNN-latent2-before-after-v1"
+        else:
+            cfg["architecture"] = "MAG-CNN-residual-hidden32-latent8-transition-v1"
+            cfg["encoder_dilations"] = [1, 2, 4, 8, 16, 32, 64]
         cfg["transition_side_offset_s"] = args.transition_side_offset_s
         cfg["transition_center_exclusion_s"] = args.transition_center_exclusion_s
+    # Cache is only an I/O optimization, not a scientific model hyperparameter.
     return hashlib.sha256(json.dumps(cfg, sort_keys=True).encode()).hexdigest()
 
 
@@ -234,6 +249,11 @@ def build_mag_model(args):
         return MagSupervisedAutoencoder()
     if args.architecture == "transition":
         return MagTransitionAutoencoder(
+            side_offset_s=args.transition_side_offset_s,
+            center_exclusion_s=args.transition_center_exclusion_s,
+        )
+    if args.architecture == "residual-transition":
+        return MagResidualTransitionAutoencoder(
             side_offset_s=args.transition_side_offset_s,
             center_exclusion_s=args.transition_center_exclusion_s,
         )
@@ -287,10 +307,13 @@ def event_plan(row):
     return (row, "MAG", sql, start, end)
 
 
-def preflight(client, selected, args):
-    """Dry-run EVERY DISTINCT event once, before any billable query starts."""
+def preflight(client, selected, args, *, include_times=None):
+    """Dry-run each event still requiring BigQuery; enforce cumulative caps."""
     unique = {r["time"]: r for fold in selected.values()
               for split in fold.values() for r in split}
+    if include_times is not None:
+        include = set(include_times)
+        unique = {t: row for t, row in unique.items() if t in include}
     plans = []
     total = 0
     for i, row in enumerate(sorted(unique.values(), key=lambda r: r["time"]), 1):
@@ -318,8 +341,8 @@ def preflight(client, selected, args):
     return plans, total
 
 
-def fetch_ram(client, plans, args):
-    """Fetch each event ONCE; science arrays never leave this process."""
+def fetch_ram(client, plans, args, *, cache=None):
+    """Fetch missing events once; atomically save each validated raw MAG block."""
     blocks = {}
     for i, plan in enumerate(plans, 1):
         row = plan[0]
@@ -338,6 +361,8 @@ def fetch_ram(client, plans, args):
         del rows
         if len(times) > 1 and np.any(np.diff(times) <= 0):
             raise ValueError(f"Repeated or reversed MAG times for {row['time']}.")
+        if cache is not None:
+            cache.save(row["time"], plan[3], plan[4], times, values)
         blocks[row["time"]] = (times, values)
         if i % 25 == 0 or i == len(plans):
             print(f"FETCHED {i}/{len(plans)} event blocks into RAM.",
@@ -684,6 +709,9 @@ def train_fold(fold, selected, blocks, normalizer, run_sig, args, device,
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed + fold)
     model = build_mag_model(args).to(device)
+    n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"FOLD {fold}: architecture={args.architecture}; "
+          f"trainable parameters={n_parameters:,}.", flush=True)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
     checkpoint_path = args.output_dir / f"fold_{fold:02d}_last.pt"
     best_path = args.output_dir / f"fold_{fold:02d}_best.pt"
@@ -812,6 +840,7 @@ def train_fold(fold, selected, blocks, normalizer, run_sig, args, device,
         "lambda_magnitude": args.lambda_magnitude,
         "sigma_seconds": args.sigma_seconds,
         "architecture": args.architecture,
+        "trainable_parameters": n_parameters,
         "val_events_selected": len(val), "train_history": history,
         "pilot_subset": bool(args.max_train_events or args.max_val_events),
         **metrics,
@@ -819,16 +848,20 @@ def train_fold(fold, selected, blocks, normalizer, run_sig, args, device,
     save_checkpoint(final_path, {
         "schema": 2, "fold": fold, "signature": run_sig,
         "best_epoch": best_epoch, "model": model.state_dict(), "config": {
-            "sigma_seconds": args.sigma_seconds, "hidden": 16,
-            "latent_channels": 2, "pooling_sigma_s": 90.0,
+            "sigma_seconds": args.sigma_seconds,
+            "hidden": 32 if args.architecture == "residual-transition" else 16,
+            "latent_channels": 8 if args.architecture == "residual-transition" else 2,
+            "pooling_sigma_s": 90.0,
             "architecture": args.architecture,
             "transition_side_offset_s": (
-                args.transition_side_offset_s if args.architecture == "transition"
+                args.transition_side_offset_s
+                if args.architecture in ("transition", "residual-transition")
                 else None
             ),
             "transition_center_exclusion_s": (
                 args.transition_center_exclusion_s
-                if args.architecture == "transition" else None
+                if args.architecture in ("transition", "residual-transition")
+                else None
             ),
         }
     })
@@ -877,7 +910,7 @@ def main():
         print("IMPORTANT: SUBSET PILOT; not full 569-event cross-validation.",
               flush=True)
     print(f"Device: {device}; epochs: {args.epochs}; "
-          "no MAVEN measurements will be written to disk.", flush=True)
+          f"MAG disk cache: {args.mag_cache_dir or 'disabled'}.", flush=True)
 
     remaining = {}
     results = {}
@@ -897,22 +930,63 @@ def main():
         print("All requested folds already completed.")
         return
 
-    client = bigquery.Client(project=bq.PROJECT)
-    bq.validate_schema(client)
-    plans, _ = preflight(client, remaining, args)
+    cache = (
+        MagEventCache(
+            args.mag_cache_dir, project=bq.PROJECT, table=bq.MAG,
+            sql=bq.MAG_SQL.format(mag=bq.MAG)
+        ) if args.mag_cache_dir is not None else None
+    )
+    unique_rows = {
+        row["time"]: row for fold in remaining.values()
+        for split in fold.values() for row in split
+    }
+    cached_blocks = {}
+    missing_times = []
+    for row in sorted(unique_rows.values(), key=lambda r: r["time"]):
+        plan = event_plan(row)
+        hit = (
+            cache.load(
+                row["time"], plan[3], plan[4],
+                max_rows=args.max_returned_rows
+            ) if cache is not None and not args.refresh_mag_cache else None
+        )
+        if hit is None:
+            missing_times.append(row["time"])
+        else:
+            cached_blocks[row["time"]] = hit
+    print(
+        f"MAG cache: {len(cached_blocks)}/{len(unique_rows)} validated events "
+        f"available; {len(missing_times)} require BigQuery.",
+        flush=True
+    )
+    client = None
+    plans = []
+    if missing_times:
+        client = bigquery.Client(project=bq.PROJECT)
+        bq.validate_schema(client)
+        plans, _ = preflight(
+            client, remaining, args, include_times=missing_times
+        )
+    else:
+        print("MAG cache complete: zero BigQuery preflight/measurement queries.",
+              flush=True)
     if not args.execute:
-        print("DRY RUN ONLY. Supply --execute to fetch MAVEN and train.")
+        print("DRY RUN ONLY. Supply --execute to load MAG and train.")
         return
 
-    blocks = fetch_ram(client, plans, args)
+    blocks = cached_blocks
     try:
+        if plans:
+            blocks.update(fetch_ram(client, plans, args, cache=cache))
+        if len(blocks) != len(unique_rows):
+            raise RuntimeError("Missing MAG blocks after cache/query acquisition.")
         for fold in remaining:
             results[fold] = train_fold(
                 fold, selected[fold], blocks, normalizers[fold],
                 signatures[fold], args, device, rows
             )
-            # Existing data are held in RAM throughout the run so each
-            # distinct selected event is fetched from BigQuery exactly once.
+            # Raw MAG blocks are kept in RAM throughout remaining folds;
+            # persistent cache makes them reusable in future runs.
     finally:
         blocks.clear()
 
@@ -931,6 +1005,7 @@ def main():
             "lambda_magnitude": args.lambda_magnitude,
             "near_label_weight": args.near_label_weight,
             "architecture": args.architecture,
+            "trainable_parameters": results[min(results)].get("trainable_parameters"),
             "min_epochs": args.min_epochs,
             "max_epochs": args.epochs,
             "early_stop_patience": args.early_stop_patience,
