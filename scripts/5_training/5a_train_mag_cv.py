@@ -450,6 +450,10 @@ def train_fold(fold, selected, blocks, normalizer, run_sig, args, device,
           f"{sum(len(ws) for _, ws in val_windows)} evaluation windows; "
           f"{invalid_train} unusable train events.", flush=True)
 
+    # Make fold initialization independent of execution/resume order.
+    torch.manual_seed(args.seed + fold)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed + fold)
     model = MagSupervisedAutoencoder().to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
     checkpoint_path = args.output_dir / f"fold_{fold:02d}_last.pt"
