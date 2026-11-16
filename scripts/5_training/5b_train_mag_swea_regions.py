@@ -816,10 +816,22 @@ def main():
         final_path = args.output_dir/f"fold_{fold:02d}_final.pt"
         if args.resume and metrics_path.exists() and final_path.exists():
             saved = json.loads(metrics_path.read_text(encoding="utf-8"))
-            if saved.get("architecture") != "dual-mag-swea-weak-regions-v1":
-                raise ValueError("Different model in seventh output directory.")
+            fit, inner, _ = previous.split_inner_monitor_months(
+                parts["train"], fold, args.seed
+            )
+            expected_signature = make_signature(
+                args, fold, fit, inner, parts["val"]
+            )
+            if (saved.get("architecture") !=
+                    "dual-mag-swea-weak-regions-v1"
+                    or saved.get("signature") != expected_signature):
+                raise ValueError(
+                    "Completed fold configuration/manifest mismatch; "
+                    "do not silently reuse an incompatible checkpoint."
+                )
             completed[fold] = saved
-            print(f"FOLD {fold}: completed and reused.", flush=True)
+            print(f"FOLD {fold}: validated completed checkpoint; skipping.",
+                  flush=True)
         else:
             remaining[fold] = parts
 
