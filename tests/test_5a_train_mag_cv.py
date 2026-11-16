@@ -102,5 +102,35 @@ class MagCVOfflineTests(unittest.TestCase):
 
 
 
+    def test_600_targets_covered_after_25_epochs(self):
+        all_seen = []
+        for epoch in range(1, 26):
+            ids = trainer.epoch_pool_indices(
+                n=600, k=0, seed=42, epoch=epoch, count=24
+            )
+            self.assertEqual(len(ids), 24)
+            self.assertEqual(len(set(ids.tolist())), 24)
+            all_seen.extend(ids.tolist())
+        self.assertEqual(len(all_seen), 600)
+        self.assertEqual(set(all_seen), set(range(600)))
+
+    def test_pool_targets_remain_gaussian_per_native_center(self):
+        import math
+        from types import SimpleNamespace
+        windows = [
+            SimpleNamespace(
+                center_s=float(t),
+                detection_score=math.exp(-0.5 * (t / 60.) ** 2),
+                offset_from_nearest_mpb_s=float(t)
+            )
+            for t in range(-300, 300)
+        ]
+        pool = trainer.compact_event_pool(windows)
+        self.assertEqual(pool.shape, (600, 3))
+        self.assertAlmostEqual(pool[300, 1], 1., places=12)
+        self.assertLess(pool[0, 1], 0.001)
+
+
+
 if __name__ == "__main__":
     unittest.main()
