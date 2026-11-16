@@ -9,7 +9,7 @@ no se guardaron en el entrenamiento. Mantener separado:
 - `scripts/6_figures/`: lectura de resultados y generación de figuras.
 - `results/metrics/<experimento>/figures/`: imágenes finales.
 
-## 6a — Resumen por fold del entrenamiento MAG (segundo por defecto)
+## 6a — Resumen, evolución de pérdidas y errores del entrenamiento MAG (tercero por defecto)
 
 Desde la **raíz del repositorio**, con `.venv` activado:
 
@@ -18,23 +18,36 @@ python scripts/6_figures/6a_plot_mag_cv_summary.py
 ```
 
 Entrada por defecto:
-`results/metrics/mag_cv_600windows_det10/cv_summary.json`
+`results/metrics/mag_cv_600windows_det10_mag1_pat20_ep1000/cv_summary.json`
 
 Salida por defecto:
-`results/metrics/mag_cv_600windows_det10/figures/mag_cv_second_training.png`
+- `results/metrics/mag_cv_600windows_det10_mag1_pat20_ep1000/figures/mag_cv_third_training.png`
+- `results/metrics/mag_cv_600windows_det10_mag1_pat20_ep1000/figures/mag_cv_training_losses.png`
+- `results/metrics/mag_cv_600windows_det10_mag1_pat20_ep1000/figures/mag_cv_error_distribution.png`
 
-El mismo script también reproduce el primer entrenamiento mediante
-`--summary results/metrics/mag_cv_full/cv_summary.json`, sin sobrescribir
-ninguna figura previa.
+El mismo script reproduce el primer, segundo o cuarto entrenamiento indicando
+el `--summary` correspondiente. Todas las imágenes se guardan junto a las
+métricas del experimento elegido; no se sobrescriben figuras de otras carpetas.
+
+De forma predeterminada produce **tres figuras**:
+1. Resumen por fold: mediana del error y porcentaje de MPB con error ≤60 s
+2. Curvas `train_rec/val_rec`, `train_det/val_det` y `train_mag/val_mag`
+   para cada uno de los cuatro folds; las curvas `val_*` representan el
+   **holdout interno por meses** de early stopping, NO la evaluación externa
+3. Histograma de errores absolutos sobre los **eventos de validación externa**
+   y curva acumulada (total y por fold), con mediana global **exacta**
+   calculada a partir de los CSV individuales
+
+Para generar solamente la figura resumen, usar `--summary-only`.
 
 La figura contiene dos paneles: error mediano de localización (minutos)
 y porcentaje de eventos localizados con error absoluto ≤60 segundos por fold.
 El resumen global agrega los recuentos de eventos de los cuatro folds.
 
-El script lee los números reales del JSON, **no tiene cifras fijas**.
-No recomputa las redes, no importa PyTorch, no consulta BigQuery ni altera
-los checkpoints. La figura no representa precision/recall ni la mediana
-global del error (esta última requiere leer los CSV por evento).
+El script lee números reales de `cv_summary.json`, los cuatro archivos
+`fold_XX_metrics.json` y los cuatro CSV de errores por evento. No
+reentrena, no consulta BigQuery ni altera checkpoints. Las métricas de
+localización **no son precision/recall/F1 ni probabilidades calibradas**.
 
 Podés personalizar las rutas:
 
@@ -60,7 +73,7 @@ el fold; con `--fold all`, los casos podrían pertenecer a modelos distintos.
 La red MAG se entrenó para ventanas de **600 s**, no de 70 minutos.
 El script recupera 70 minutos de datos reales alrededor de cada etiqueta,
 reproduce las **600 ventanas de 600 s** de la evaluación externa por evento
-en el segundo entrenamiento (121 en el primero),
+en los entrenamientos segundo, tercero y cuarto (121 en el primero),
 calcula la reconstrucción en nT en cada una y promedia las porciones
 solapadas en los mismos instantes nativos. Los **centros** evaluables
 están aproximadamente entre −30 y +30 min porque cada ventana
@@ -69,7 +82,9 @@ quedan huecos sin interpolar. **No se vuelve a entrenar.**
 
 La figura tiene dos columnas (caso bueno y malo) y cinco filas:
 - 4 paneles de **MAG observado vs reconstruido**: Bx, By, Bz, |B|
-  durante los 70 minutos;
+  durante los 70 minutos. En el panel de |B| se superpone, con línea
+  discontinua, `sqrt(Bx_rec^2 + By_rec^2 + Bz_rec^2)` para comprobar
+  consistencia física;
 - abajo, **puntaje MPB del detector** frente al tiempo del centro
   de ventana, junto con el objetivo gaussiano de entrenamiento.
 
@@ -93,8 +108,14 @@ python scripts/6_figures/6b_plot_mag_reconstruction_cases.py
 python scripts/6_figures/6b_plot_mag_reconstruction_cases.py --execute
 ```
 
-Salida:
-`results/metrics/mag_cv_600windows_det10/figures/mag_cv_reconstruction_good_vs_bad.png`
+Salida por defecto:
+`results/metrics/mag_cv_600windows_det10_mag1_pat20_ep1000/figures/mag_cv_reconstruction_good_vs_bad.png`
+
+Se genera junto con la figura un JSON de trazabilidad con el error
+temporal y tres errores RMS en **nT**: del canal reconstruido |B| respecto al
+observado, de la norma xyz reconstruida respecto al |B| observado, y de
+la diferencia entre ambos módulos reconstruidos. Todos se calculan
+solo en muestras observadas cubiertas por reconstrucción.
 
 El script lee automáticamente del `cv_summary.json` la cantidad de
 centros de evaluación y `sigma`, para que las predicciones coincidan
@@ -109,8 +130,10 @@ En ese caso se generan las figuras en `mag_cv_full/figures/`.
 Se añade un JSON pequeño con fechas/folds y errores para trazabilidad,
 pero **no se guardan archivos con mediciones MAG sin procesar**.
 
-Por defecto se usa `--fold 1`. Opcional: `--fold 2` o `--fold 3`
-para otro modelo específico, o `--fold all` para elegir entre todos
+Por defecto se usa `--fold 1`. Si no hay eventos de ambos grupos
+(acierto/error) en ese fold, usar `--fold 2`, `--fold 3` o
+`--fold all`; esta última opción puede seleccionar modelos diferentes
+para cada caso. Los parámetros permiten elegir entre todos
 los folds. `--max-total-gib` y `--max-query-gib` ajustan los límites
 de las consultas. Si una puntuación recalculada difiere de la registrada
 en el CSV por más de 2 s de desplazamiento, el programa se detiene
