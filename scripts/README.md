@@ -131,3 +131,17 @@ se realiza en nT y usa la escala de |B| del normalizador de TRAIN.
 Resultados en `results/metrics/mag_cv_600windows_det10_mag1_pat20_ep1000/`,
 sin modificar los experimentos 1 y 2. Ver
 `docs/mag_cross_validation_training.md`.
+
+### Arquitectura MAG 1/3 — detector de transición antes/después
+
+`src/detection/mag_transition_autoencoder.py` reutiliza el encoder y decoder
+actuales, sustituyendo solo la cabeza supervisada por una que consume
+`[z_centro, z_antes, z_después, z_después-z_antes]`. El nuevo runner es
+`scripts/5_training/run_mag_cv_transition.sh` y guarda exclusivamente en
+`results/metrics/mag_cv_transition_v1/`. El tercer entrenamiento continúa
+usando `run_mag_cv_full.sh` con su arquitectura original.
+
+```bash
+# CUARTO experimento completo, cuando haya terminado el tercero:
+bash scripts/5_training/run_mag_cv_transition.sh
+```
