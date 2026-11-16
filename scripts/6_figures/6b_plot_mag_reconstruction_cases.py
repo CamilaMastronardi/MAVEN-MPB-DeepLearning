@@ -253,9 +253,10 @@ def plot_cases(cases, out):
     """Two columns (good/bad); four physical channels and score below."""
     fig, axes = plt.subplots(
         5, 2, figsize=(18, 15.5), sharex="col",
-        gridspec_kw={"height_ratios": [1, 1, 1, 1, 1.3]},
-        layout="constrained"
+        gridspec_kw={"height_ratios": [1, 1, 1, 1, 1.3]}
     )
+    fig.subplots_adjust(left=0.07, right=0.98, top=0.86,
+                        bottom=0.105, wspace=0.22, hspace=0.13)
     channels = [r"$B_x$", r"$B_y$", r"$B_z$", r"$|B|$"]
     colors = {
         "real": "#30343B", "recon": "#346FA4",
@@ -319,18 +320,19 @@ def plot_cases(cases, out):
         Line2D([], [], color=colors["target"], ls=":", lw=1.5,
                label="Objetivo gaussiano de entrenamiento"),
     ]
-    fig.legend(handles=handles, loc="outside upper center",
-               bbox_to_anchor=(0.5, 1.04), ncol=3, frameon=False, fontsize=9)
     fig.suptitle(
         "MAVEN MAG — señal real, reconstrucción y localización de la MPB",
-        fontsize=15, fontweight="bold"
+        fontsize=15, fontweight="bold", y=0.99
     )
-    fig.supxlabel(
-        "Cada serie abarca 70 min. La reconstrucción combina ventanas "
-        "solapadas de 10 min; las bandas NO representan el espesor de la MPB.\n"
+    fig.legend(handles=handles, loc="upper center",
+               bbox_to_anchor=(0.5, 0.955), ncol=3, frameon=False, fontsize=9)
+    fig.text(
+        0.5, 0.025,
+        "Cada serie abarca 70 min. Reconstrucción: promedio de ventanas "
+        "solapadas de 10 min; las bandas no representan el espesor de la MPB.\\n"
         "El puntaje entre 0 y 1 indica cercanía a una MPB etiquetada; "
-        "NO es una probabilidad calibrada.",
-        fontsize=9
+        "no es una probabilidad calibrada.",
+        ha="center", fontsize=9
     )
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=200, bbox_inches="tight")
