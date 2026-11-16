@@ -232,3 +232,18 @@ En la reconstrucción `6b` se traza el puntaje **temporal fusionado en las
 muestras MAG nativas**, no solo 600 puntajes por centro de ventana. La
 comparación v5-v6 mantiene eventos y ventanas idénticas, pero cambia la
 resolución y agregación de la salida, así como el objetivo de entrenamiento.
+
+### Séptimo entrenamiento: figuras MAG+SWEA
+
+Las figuras de la nueva clasificación de regiones se encuentran en
+`scripts/7_figures/` porque v7 tiene pérdidas y entradas diferentes:
+
+```bash
+python scripts/7_figures/7a_plot_mag_swea_results.py \
+  --results-dir results/metrics/mag_swea_regions_v1 \
+  --compare-v5 results/metrics/mag_cv_residual_transition_v1
+```
+
+Se crean paneles de error mediano, precisión de candidatos con etiquetas
+débiles, curvas de pérdida, distribución de errores y comparación emparejada
+con los eventos que tienen tanto MAG como SWEA evaluable.
