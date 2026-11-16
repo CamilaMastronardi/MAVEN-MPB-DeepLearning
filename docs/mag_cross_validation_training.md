@@ -1,8 +1,8 @@
 # Entrenamiento inicial de MAG: autoencoder convolucional supervisado y 4 folds
 
-El programa \`scripts/5_training/5a_train_mag_cv.py\` es un **primer entrenamiento
+El programa `scripts/5_training/5a_train_mag_cv.py` es un **primer entrenamiento
 real con MAG**, independiente de Jupyter, basado en el mismo modelo que el
-notebook \`01_mag_autoencoder.ipynb\`. No se usan mediciones artificiales.
+notebook `01_mag_autoencoder.ipynb`. No se usan mediciones artificiales.
 
 ## Diseño y separación de datos
 
@@ -10,13 +10,13 @@ notebook \`01_mag_autoencoder.ipynb\`. No se usan mediciones artificiales.
 - En el fold k, solo eventos de los otros tres folds entran en TRAIN; el fold
   k queda completamente reservado para VALIDATION.
 - Los cuatro normalizadores MAG de 4c deben existir como archivos JSON finales.
-  Se verifica la firma del manifiesto y los parámetros \`mean/scale\`.
+  Se verifica la firma del manifiesto y los parámetros `mean/scale`.
 - MAG: Bx, By, Bz, |B|. Cada ejemplo es una ventana de 600 s con muestras
-  nativas, máscara temporal y etiqueta de proximidad gaussiana (\`sigma=60s\`).
+  nativas, máscara temporal y etiqueta de proximidad gaussiana (`sigma=60s`).
 - Encoder CNN 1D temporal → representación latente → (a) decoder de
   reconstrucción y (b) detector supervisado escalar.
 - Pérdida: MSE de reconstrucción en muestras no rellenadas por padding
-  más \`lambda_detection\` veces MSE supervisado ponderado.
+  más `lambda_detection` veces MSE supervisado ponderado.
 - Para TRAIN se toma un conjunto disperso de ventanas por evento, dividido
   entre centros próximos y alejados de la etiqueta, para reducir el peso de
   los miles de ventanas casi idénticas por cruce. Para VALIDATION se toman
@@ -32,9 +32,9 @@ ajustar el modelo con el fold de validación.
 
 ## Primera ejecución recomendada: piloto de 4 folds con datos reales
 
-Ejecutar desde la raíz del repositorio con \`.venv\` activado:
+Ejecutar desde la raíz del repositorio con `.venv` activado:
 
-\`\`\`bash
+```bash
 python -m unittest discover -s tests -v
 
 # SOLO ESTIMACIÓN, sin consultar mediciones:
@@ -51,9 +51,9 @@ python -u scripts/5_training/5a_train_mag_cv.py \
     --max-total-gib 35 \
     --resume --execute \
     2>&1 | tee -a results/metrics/mag_cv/training.log
-\`\`\`
+```
 
-El parámetro \`--execute\` es un opt-in explícito. Sin él, se inspeccionan
+El parámetro `--execute` es un opt-in explícito. Sin él, se inspeccionan
 los normalizadores, las divisiones y los costos estimados pero no se descargan
 las mediciones. El programa estima **todos** los eventos que necesita antes
 de disparar cualquier consulta facturable. Por defecto, cada consulta está
@@ -70,19 +70,19 @@ el piloto.
 
 ## Mantenerlo ejecutándose en WSL con tmux
 
-\`\`\`bash
+```bash
 cd ~/Codigos/MAVEN-MPB-DeepLearning
 source .venv/bin/activate
 git pull origin main
 tmux new -s mag_cv
-\`\`\`
+```
 
 Dentro de tmux, ejecutar el comando de entrenamiento de arriba. Para separar
-la terminal sin detenerlo, presionar \`Ctrl+B\`, luego \`D\`. Para volver:
+la terminal sin detenerlo, presionar `Ctrl+B`, luego `D`. Para volver:
 
-\`\`\`bash
+```bash
 tmux attach -t mag_cv
-\`\`\`
+```
 
 La máquina **debe permanecer encendida y sin suspensión**. Si una excepción
 detiene el proceso, el checkpoint conserva el final de la última época
@@ -93,20 +93,20 @@ requiere volver a consultar los bloques de MAVEN.
 
 Se guardan SOLO pesos del modelo, estado de AdamW y estadísticas pequeñas:
 
-- \`results/metrics/mag_cv/fold_01_last.pt\`: checkpoint de última época.
-- \`results/metrics/mag_cv/fold_01_final.pt\`: pesos finales del fold.
-- \`results/metrics/mag_cv/fold_01_metrics.json\`: historial de pérdidas y
+- `results/metrics/mag_cv/fold_01_last.pt`: checkpoint de última época.
+- `results/metrics/mag_cv/fold_01_final.pt`: pesos finales del fold.
+- `results/metrics/mag_cv/fold_01_metrics.json`: historial de pérdidas y
   resumen de localización de MPB en VAL.
-- \`results/metrics/mag_cv/fold_01_event_metrics.csv\`: por cada evento
+- `results/metrics/mag_cv/fold_01_event_metrics.csv`: por cada evento
   de VAL: offset del pico, error temporal absoluto, puntuación del pico.
-- Análogos para folds 2–4, además de \`cv_summary.json\`.
+- Análogos para folds 2–4, además de `cv_summary.json`.
 
 Las métricas de localización incluyen error absoluto mediano, percentil 90
 y proporción de cruces dentro de 60/120 s del instante catalogado. Estas
 cifras **no equivalen a precision, recall, F1 ni a un benchmark de falsos
 positivos en órbitas sin MPB**, porque únicamente se consideran vecindades
 de eventos conocidos y todavía no contamos con anotaciones completas de
-ausencia de MPB. El \`sigma\` de las etiquetas es un parámetro de supervisión,
+ausencia de MPB. El `sigma` de las etiquetas es un parámetro de supervisión,
 no un espesor físico de la MPB.
 
 ## Validación cruzada completa (después de comprobar el piloto)
@@ -115,7 +115,7 @@ Se necesita elegir TODOS los eventos (ambos límites = 0). Utilizar
 **otro directorio de resultados** para no mezclar los checkpoints del
 piloto, y un cap explícito suficientemente grande tras leer la estimación:
 
-\`\`\`bash
+```bash
 # Estima los cuatro folds completos, sin gastar consultas de mediciones:
 python scripts/5_training/5a_train_mag_cv.py \
     --folds all --epochs 3 \
@@ -125,7 +125,7 @@ python scripts/5_training/5a_train_mag_cv.py \
 
 # Mismo comando con --execute --resume SOLO si la estimación total,
 # los límites del proyecto y el tiempo de ejecución son aceptables.
-\`\`\`
+```
 
 La consulta de cada evento se reutiliza en memoria entre folds dentro de
 una misma ejecución. El gasto depende de los datos realmente estimados por
