@@ -41,9 +41,12 @@ consulta un bloque de 70 minutos en BigQuery, genera ventanas y forma un lote
 normalizado usando solamente las estadísticas preexistentes del TRAIN.
 No guarda mediciones descargadas en archivos locales.
 
-El notebook **no entrena** un autoencoder todavía. El desarrollo de la
-arquitectura encoder → decoder + detector supervisado se realizará después
-de inspeccionar las ventanas reales. La evaluación definitiva debe hacerse
+El notebook MAG **define ya una primera arquitectura provisional**:
+encoder CNN 1D, decoder de reconstrucción y detector de cercanía a MPB,
+además de una pasada sin entrenamiento que sólo se habilita con datos reales.
+No hay entrenamiento ni resultados de detección todavía. Para SWEA primero
+inspeccionaremos las dimensiones energía-tiempo reales y después construiremos
+la CNN 2D. La evaluación definitiva debe hacerse
 por evento y con separación por fold, nunca interpretando ventanas altamente
 superpuestas como muestras independientes.
 
