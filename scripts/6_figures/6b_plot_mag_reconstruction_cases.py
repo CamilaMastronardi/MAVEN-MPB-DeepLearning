@@ -46,6 +46,8 @@ from src.detection.mag_transition_autoencoder import MagTransitionAutoencoder
 from src.detection.mag_residual_transition_autoencoder import (
     MagResidualTransitionAutoencoder
 )
+from src.detection.mag_dense_temporal_autoencoder import MagDenseTemporalAutoencoder
+from src.detection.mag_temporal_scoring import DenseNativeScoreFusion
 from src.data.mag_event_cache import MagEventCache
 
 DEFAULT_RESULTS = Path("results/metrics/mag_cv_600windows_det10_mag1_pat20_ep1000")
@@ -202,6 +204,12 @@ def load_model_and_normalizer(fold, args, manifest_rows):
             side_offset_s=float(config["transition_side_offset_s"]),
             center_exclusion_s=float(config["transition_center_exclusion_s"]),
         )
+    elif architecture == "dense-temporal":
+        model = MagDenseTemporalAutoencoder(
+            **shared,
+            side_offset_s=float(config["transition_side_offset_s"]),
+            center_exclusion_s=float(config["transition_center_exclusion_s"]),
+        )
     else:
         raise ValueError(f"Unknown saved MAG detector architecture: {architecture}")
     model.load_state_dict(state["model"], strict=True)
@@ -232,7 +240,10 @@ def build_validation_windows(times, values, event, manifest_rows, args):
 
 
 @torch.inference_mode()
-def reconstruct_block(model, normalizer, times, windows, batch_size):
+def reconstruct_block(
+    model, normalizer, times, windows, batch_size,
+    *, event_time_s=None, sigma_seconds=60.0
+):
     """Use original validation centers; average decoded overlapping windows.
 
     The predictions and individual 10-min reconstructions are on native
@@ -244,14 +255,22 @@ def reconstruct_block(model, normalizer, times, windows, batch_size):
     scores = []
     centers = []
     targets = []
-
+    dense = isinstance(model, MagDenseTemporalAutoencoder)
+    fusion = (
+        DenseNativeScoreFusion(windows, event_time_s, radius_s=1800.0)
+        if dense and event_time_s is not None else None
+    )
+    if dense and fusion is None:
+        raise ValueError("Dense reconstruction requires event_time_s.")
     for begin in range(0, len(windows), batch_size):
         group = windows[begin:begin + batch_size]
         batch = batching.collate_native_windows(group, normalizer=normalizer)
         _, decoded, outputs = model(
             batch.x, batch.time_mask, batch.rel_time_s
         )
-        prediction = outputs.squeeze(-1).cpu().numpy()
+        prediction = outputs.cpu().numpy()
+        if not dense:
+            prediction = prediction.squeeze(-1)
         reconstructed = decoded.cpu().numpy()
 
         for j, w in enumerate(group):
@@ -272,10 +291,20 @@ def reconstruct_block(model, normalizer, times, windows, batch_size):
             )
             sums[lo:hi] += raw_nt
             coverage[lo:hi] += 1
-            centers.append(center)
-            scores.append(float(prediction[j]))
-            targets.append(float(w.detection_score))
+            if dense:
+                fusion.add_window(w, prediction[j, :n])
+            else:
+                centers.append(center)
+                scores.append(float(prediction[j]))
+                targets.append(float(w.detection_score))
 
+    if dense:
+        result = fusion.finish()
+        centers = result["times_s"]
+        scores = result["scores"]
+        targets = np.exp(
+            -0.5 * ((centers - event_time_s) / sigma_seconds) ** 2
+        )
     blended = np.full_like(sums, np.nan)
     covered = coverage > 0
     blended[covered] = sums[covered] / coverage[covered, None]
@@ -285,6 +314,7 @@ def reconstruct_block(model, normalizer, times, windows, batch_size):
         "centers_s": np.asarray(centers),
         "scores": np.asarray(scores),
         "target": np.asarray(targets),
+        "n_scored_windows": len(windows),
     }
 
 
@@ -537,7 +567,9 @@ def main():
             times, values, case, manifest_rows, args
         )
         inferred = reconstruct_block(
-            model, normalizer, times, windows, args.batch_size
+            model, normalizer, times, windows, args.batch_size,
+            event_time_s=case["time"].timestamp(),
+            sigma_seconds=args.sigma_seconds,
         )
         best_index = int(np.argmax(inferred["scores"]))
         peak = float(inferred["centers_s"][best_index])
@@ -563,7 +595,8 @@ def main():
             "saved_abs_error_s": case["error_s"],
             "recomputed_abs_error_s": abs(peak-case["time"].timestamp()),
             "best_epoch": best_epoch,
-            "n_scored_windows": len(output["scores"]),
+            "n_scored_windows": output["n_scored_windows"],
+            "n_temporal_score_points": len(output["scores"]),
             "n_real_epochs": len(times),
             "magnitude_rmse": magnitude_diagnostics(
                 values, output["reconstruction_nt"]
@@ -574,6 +607,7 @@ def main():
             "Reconstruction is average of overlapping 600-s CNN decodings.",
             "The label and prediction bands show centered 600-s windows.",
             "The supervised score is NOT a calibrated MPB probability.",
+            "For dense-temporal v6, overlapping native sample scores are averaged at UTC timestamps.",
             "Magnitude metrics are computed on 70-min reconstruction averages.",
             "Vector-derived |B| is computed from the reconstructed xyz components.",
         ],
