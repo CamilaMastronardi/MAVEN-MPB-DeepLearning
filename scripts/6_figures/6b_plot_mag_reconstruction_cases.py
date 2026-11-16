@@ -391,6 +391,29 @@ def plot_cases(cases, out):
     plt.close(fig)
 
 
+def magnitude_diagnostics(observed, reconstructed):
+    """Errors in physical nT from actual covered measurement epochs only."""
+    valid = np.isfinite(reconstructed).all(axis=1)
+    if not np.any(valid):
+        return {
+            "rmse_decoded_magnitude_nt": None,
+            "rmse_vector_magnitude_nt": None,
+            "rmse_magnitude_consistency_nt": None,
+        }
+    mag_channel = reconstructed[valid, 3]
+    vector_magnitude = np.linalg.norm(reconstructed[valid, :3], axis=1)
+    real_mag = observed[valid, 3]
+    return {
+        "rmse_decoded_magnitude_nt":
+            float(np.sqrt(np.mean((mag_channel - real_mag) ** 2))),
+        "rmse_vector_magnitude_nt":
+            float(np.sqrt(np.mean((vector_magnitude - real_mag) ** 2))),
+        "rmse_magnitude_consistency_nt":
+            float(np.sqrt(np.mean((vector_magnitude - mag_channel) ** 2))),
+    }
+
+
+
 def main():
     args = args_parser()
     saved_centers, saved_sigma = load_evaluation_config(args.results_dir)
@@ -488,26 +511,6 @@ def main():
 
     plot_cases(results, args.output)
 
-    def magnitude_diagnostics(observed, reconstructed):
-        """Errors in physical nT from actual covered measurement epochs only."""
-        valid = np.isfinite(reconstructed).all(axis=1)
-        if not np.any(valid):
-            return {
-                "rmse_decoded_magnitude_nt": None,
-                "rmse_vector_magnitude_nt": None,
-                "rmse_magnitude_consistency_nt": None,
-            }
-        mag_channel = reconstructed[valid, 3]
-        vector_magnitude = np.linalg.norm(reconstructed[valid, :3], axis=1)
-        real_mag = observed[valid, 3]
-        return {
-            "rmse_decoded_magnitude_nt":
-                float(np.sqrt(np.mean((mag_channel - real_mag) ** 2))),
-            "rmse_vector_magnitude_nt":
-                float(np.sqrt(np.mean((vector_magnitude - real_mag) ** 2))),
-            "rmse_magnitude_consistency_nt":
-                float(np.sqrt(np.mean((vector_magnitude - mag_channel) ** 2))),
-        }
 
     metadata = {
         "figure": str(args.output),
