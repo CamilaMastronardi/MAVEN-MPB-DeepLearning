@@ -2,8 +2,8 @@
 """Plot two REAL MAVEN MAG 70-minute events: well and poorly localized MPB.
 
 A trained MAG model accepts 10-minute windows, NOT 70-minute inputs. This
-script uses the SAME 121 spaced 10-minute windows as the saved outer-CV
-event evaluation. Each window has (1) reconstructed Bx/By/Bz/|B| and (2) a
+script uses the SAME number of spaced 10-minute windows as the saved outer-CV
+event evaluation (600 for the second training, 121 for the first). Each window has (1) reconstructed Bx/By/Bz/|B| and (2) a
 supervised MPB proximity score. Overlapping decoder outputs are averaged
 at original measurement timestamps to visualize the full 70-minute block.
 
@@ -42,7 +42,7 @@ batching = import_module("scripts.4_preprocessing.4a_native_batches")
 trainer = import_module("scripts.5_training.5a_train_mag_cv")
 from src.detection.mag_autoencoder import MagSupervisedAutoencoder
 
-DEFAULT_RESULTS = Path("results/metrics/mag_cv_full")
+DEFAULT_RESULTS = Path("results/metrics/mag_cv_600windows_det10")
 DEFAULT_NORMALIZERS = Path("results/metrics/fold_normalization")
 DEFAULT_MANIFEST = Path("data/splits/cv4_monthly_manifest.csv")
 GIB = 1024**3
@@ -61,8 +61,10 @@ def args_parser():
     p.add_argument("--bad-min-seconds", type=float, default=600.0)
     p.add_argument("--batch-size", type=int, default=16,
                    help="Must match batch size used for original outer-CV predictions.")
-    p.add_argument("--val-centers-per-event", type=int, default=121,
-                   help="Must match the original CV event-scoring configuration.")
+    p.add_argument("--val-centers-per-event", type=int, default=None,
+                   help="Number of validation centers; defaults to value saved in CV summary.")
+    p.add_argument("--sigma-seconds", type=float, default=None,
+                   help="Gaussian sigma in seconds; defaults to value saved in CV summary.")
     p.add_argument("--max-query-gib", type=float, default=1.)
     p.add_argument("--max-total-gib", type=float, default=2.)
     p.add_argument("--max-returned-rows", type=int, default=25000)
@@ -71,12 +73,34 @@ def args_parser():
                    help="Actually fetch the two 70-minute MAG series and save figure.")
     a = p.parse_args()
     if (a.good_max_seconds < 0 or a.bad_min_seconds <= a.good_max_seconds
-        or min(a.batch_size, a.val_centers_per_event, a.max_query_gib,
-               a.max_total_gib, a.max_returned_rows, a.torch_threads) <= 0):
+        or min(a.batch_size, a.max_query_gib,
+               a.max_total_gib, a.max_returned_rows, a.torch_threads) <= 0
+        or (a.val_centers_per_event is not None and a.val_centers_per_event <= 0)
+        or (a.sigma_seconds is not None and a.sigma_seconds <= 0)):
         p.error("Invalid thresholds, batch size, or BigQuery query limits.")
     if a.output is None:
         a.output = a.results_dir / "figures/mag_cv_reconstruction_good_vs_bad.png"
     return a
+
+
+def load_evaluation_config(results_dir: Path):
+    """Recover exact held-out scoring settings from the trained experiment.
+
+    First run has no training_configuration and used 121 centers, sigma=60 s.
+    The new run records 600 centers and sigma=60 s.
+    """
+    path = results_dir / "cv_summary.json"
+    summary = json.loads(path.read_text(encoding="utf-8"))
+    if (summary.get("instrument") != "MAG"
+            or summary.get("pilot_subset") is not False
+            or sorted(summary.get("completed_folds", [])) != [1, 2, 3, 4]):
+        raise ValueError("Require completed, full four-fold MAG CV results.")
+    config = summary.get("training_configuration", {})
+    centers = int(config.get("val_centers_per_event", 121))
+    sigma = float(config.get("sigma_seconds", 60.))
+    if centers <= 0 or sigma <= 0:
+        raise ValueError("Invalid window evaluation settings in saved summary.")
+    return centers, sigma
 
 
 def read_event_scores(results_dir, fold_filter="all"):
@@ -171,7 +195,7 @@ def build_validation_windows(times, values, event, manifest_rows, args):
         split_labels_s=labels,
         window_seconds=600.,
         center_range_seconds=1800.,
-        sigma_seconds=60.
+        sigma_seconds=args.sigma_seconds
     ))
     chosen = trainer.select_spaced(candidates, args.val_centers_per_event)
     if not chosen:
@@ -341,7 +365,24 @@ def plot_cases(cases, out):
 
 def main():
     args = args_parser()
+    saved_centers, saved_sigma = load_evaluation_config(args.results_dir)
+    # A different set of evaluation centers could create a different peak.
+    # We must reconstruct the exact scoring used to label each good/bad case.
+    if args.val_centers_per_event not in (None, saved_centers):
+        raise ValueError(
+            f"Saved experiment used {saved_centers} centers per event. "
+            "Refusing a non-equivalent evaluation."
+        )
+    if args.sigma_seconds not in (None, saved_sigma):
+        raise ValueError(
+            f"Saved experiment used sigma={saved_sigma:g} seconds. "
+            "Refusing a non-equivalent label for the plot."
+        )
+    args.val_centers_per_event = saved_centers
+    args.sigma_seconds = saved_sigma
     torch.set_num_threads(args.torch_threads)
+    print(f"Using saved CV evaluation: {saved_centers} window centers/event, "
+          f"Gaussian sigma={saved_sigma:g} s.", flush=True)
     manifest_rows = pilot.read_manifest(args.manifest)
     scores = read_event_scores(args.results_dir, args.fold)
     good, bad = select_cases(scores, args.good_max_seconds, args.bad_min_seconds)
@@ -420,7 +461,9 @@ def main():
     plot_cases(results, args.output)
     metadata = {
         "figure": str(args.output),
-        "experiment": "MAG outer four-fold CV full",
+        "experiment": str(args.results_dir),
+        "val_centers_per_event": args.val_centers_per_event,
+        "sigma_seconds": args.sigma_seconds,
         "cases": [{
             "kind": kind, "fold": case["fold"],
             "label_utc": case["time"].isoformat(),
