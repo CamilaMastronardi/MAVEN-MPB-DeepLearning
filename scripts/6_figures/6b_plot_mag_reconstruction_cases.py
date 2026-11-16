@@ -43,6 +43,9 @@ batching = import_module("scripts.4_preprocessing.4a_native_batches")
 trainer = import_module("scripts.5_training.5a_train_mag_cv")
 from src.detection.mag_autoencoder import MagSupervisedAutoencoder
 from src.detection.mag_transition_autoencoder import MagTransitionAutoencoder
+from src.detection.mag_residual_transition_autoencoder import (
+    MagResidualTransitionAutoencoder
+)
 
 DEFAULT_RESULTS = Path("results/metrics/mag_cv_600windows_det10_mag1_pat20_ep1000")
 DEFAULT_NORMALIZERS = Path("results/metrics/fold_normalization")
@@ -183,6 +186,12 @@ def load_model_and_normalizer(fold, args, manifest_rows):
         model = MagSupervisedAutoencoder(**shared)
     elif architecture == "transition":
         model = MagTransitionAutoencoder(
+            **shared,
+            side_offset_s=float(config["transition_side_offset_s"]),
+            center_exclusion_s=float(config["transition_center_exclusion_s"]),
+        )
+    elif architecture == "residual-transition":
+        model = MagResidualTransitionAutoencoder(
             **shared,
             side_offset_s=float(config["transition_side_offset_s"]),
             center_exclusion_s=float(config["transition_center_exclusion_s"]),
