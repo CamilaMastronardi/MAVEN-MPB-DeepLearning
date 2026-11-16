@@ -46,6 +46,7 @@ from src.detection.mag_transition_autoencoder import MagTransitionAutoencoder
 from src.detection.mag_residual_transition_autoencoder import (
     MagResidualTransitionAutoencoder
 )
+from src.data.mag_event_cache import MagEventCache
 
 DEFAULT_RESULTS = Path("results/metrics/mag_cv_600windows_det10_mag1_pat20_ep1000")
 DEFAULT_NORMALIZERS = Path("results/metrics/fold_normalization")
@@ -73,6 +74,11 @@ def args_parser():
     p.add_argument("--max-query-gib", type=float, default=1.)
     p.add_argument("--max-total-gib", type=float, default=2.)
     p.add_argument("--max-returned-rows", type=int, default=25000)
+    p.add_argument("--mag-cache-dir", type=Path,
+                   default=Path("data/cache/mag_events"),
+                   help="Reuse stored original MAG 70-minute blocks from v5.")
+    p.add_argument("--no-mag-cache", action="store_true",
+                   help="Ignore local MAG cache and query BigQuery as before.")
     p.add_argument("--torch-threads", type=int, default=2)
     p.add_argument("--execute", action="store_true",
                    help="Actually fetch the two 70-minute MAG series and save figure.")
@@ -456,47 +462,72 @@ def main():
               f"event={case['time'].isoformat()}, "
               f"stored error={case['error_s']:.1f} s.", flush=True)
 
-    client = bigquery.Client(project=bq.PROJECT)
-    bq.validate_schema(client)
     sql = bq.MAG_SQL.format(mag=bq.MAG)
-    plans, total = [], 0
+    cache = (
+        None if args.no_mag_cache else MagEventCache(
+            args.mag_cache_dir, project=bq.PROJECT, table=bq.MAG, sql=sql
+        )
+    )
+    client = None
+    plans, total, cache_hits = [], 0, 0
     for kind, case in selected:
         start = case["time"] - timedelta(minutes=35)
         end = case["time"] + timedelta(minutes=35)
-        dry = client.query(
-            sql, job_config=bq.query_config(
-                start, end, dry_run=True, max_bytes=1
-            )
+        cached = (
+            cache.load(
+                case["time"], start, end, max_rows=args.max_returned_rows
+            ) if cache is not None else None
         )
-        estimate = int(dry.total_bytes_processed or 0)
-        total += estimate
-        if estimate > args.max_query_gib * GIB:
-            raise RuntimeError(f"{kind} event query exceeds max-query-gib.")
-        plans.append((kind, case, start, end, estimate))
-    print(f"BigQuery DRY RUN: total for two 70-min events = "
-          f"{total/GIB:.5f} GiB; cap {args.max_total_gib:.3f} GiB.",
-          flush=True)
+        estimate = 0
+        if cached is None:
+            if client is None:
+                client = bigquery.Client(project=bq.PROJECT)
+                bq.validate_schema(client)
+            dry = client.query(
+                sql, job_config=bq.query_config(
+                    start, end, dry_run=True, max_bytes=1
+                )
+            )
+            estimate = int(dry.total_bytes_processed or 0)
+            total += estimate
+            if estimate > args.max_query_gib * GIB:
+                raise RuntimeError(f"{kind} event query exceeds max-query-gib.")
+        else:
+            cache_hits += 1
+        plans.append((kind, case, start, end, estimate, cached))
+    print(
+        f"MAG 70-min blocks: {cache_hits}/{len(plans)} read from local cache, "
+        f"{len(plans)-cache_hits} BigQuery query candidates. "
+        f"BigQuery dry-run total={total/GIB:.5f} GiB "
+        f"(cap={args.max_total_gib:.3f} GiB).",
+        flush=True
+    )
     if total > args.max_total_gib * GIB:
         raise RuntimeError("Query estimates exceed the total cap; no data fetched.")
     if not args.execute:
-        print("Dry-run only. Add --execute to fetch two REAL MAG events and plot.")
+        print("Dry-run only. Add --execute to plot the selected REAL MAG events.")
         return
 
     results = []
-    for kind, case, start, end, _ in plans:
-        job = client.query(
-            sql, job_config=bq.query_config(
-                start, end, dry_run=False,
-                max_bytes=int(args.max_query_gib * GIB)
+    for kind, case, start, end, _, cached in plans:
+        if cached is not None:
+            times, values = cached
+        else:
+            job = client.query(
+                sql, job_config=bq.query_config(
+                    start, end, dry_run=False,
+                    max_bytes=int(args.max_query_gib * GIB)
+                )
             )
-        )
-        rows = []
-        for row in job.result(page_size=250):
-            rows.append(row)
-            if len(rows) > args.max_returned_rows:
-                raise MemoryError("BigQuery row cap exceeded.")
-        times, values, _ = pilot.read_mag(rows)
-        del rows
+            rows = []
+            for row in job.result(page_size=250):
+                rows.append(row)
+                if len(rows) > args.max_returned_rows:
+                    raise MemoryError("BigQuery row cap exceeded.")
+            times, values, _ = pilot.read_mag(rows)
+            del rows
+            if cache is not None:
+                cache.save(case["time"], start, end, times, values)
         if len(times) < 3 or np.any(np.diff(times) <= 0):
             raise ValueError("Insufficient/duplicate MAG timestamps.")
         model, normalizer, best_epoch = load_model_and_normalizer(
