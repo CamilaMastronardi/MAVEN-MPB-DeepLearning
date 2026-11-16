@@ -55,8 +55,8 @@ def args_parser():
     p.add_argument("--normalizers-dir", type=Path, default=DEFAULT_NORMALIZERS)
     p.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     p.add_argument("--output", type=Path, default=None)
-    p.add_argument("--fold", choices=("all", "1", "2", "3", "4"), default="all",
-                   help="Restrict both examples to this held-out fold, or use all.")
+    p.add_argument("--fold", choices=("all", "1", "2", "3", "4"), default="1",
+                   help="Choose success/failure from SAME held-out model; all allows different folds.")
     p.add_argument("--good-max-seconds", type=float, default=60.0)
     p.add_argument("--bad-min-seconds", type=float, default=600.0)
     p.add_argument("--batch-size", type=int, default=16,
