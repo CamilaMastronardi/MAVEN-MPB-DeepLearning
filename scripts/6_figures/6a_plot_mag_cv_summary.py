@@ -305,8 +305,8 @@ def plot_fold_comparison(current, previous, path: Path, *,
     fig.suptitle(f"MAG — {previous_label} vs {current_label}",
                  fontsize=14, fontweight="bold")
     fig.supxlabel(
-        "Comparación con igual resolución de centros y mismos folds. "
-        "Las diferencias pueden deberse a múltiples cambios de entrenamiento.",
+        "Mismas MPB y 600 ventanas de entrada por evento. "
+        "La versión temporal combina puntajes sobre tiempos MAG nativos.",
         fontsize=9
     )
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -510,9 +510,16 @@ def plot_paired_localization(paired_rows, stats, out_path: Path):
     return out_path
 
 
-def save_paired_localization(paired_rows, stats, figures_dir, *, fifth=False):
-    basename = ("mag_cv_paired_fourth_vs_fifth" if fifth
-                else "mag_cv_paired_comparison")
+def save_paired_localization(
+    paired_rows, stats, figures_dir, *, fifth=False, sixth=False
+):
+    if fifth and sixth:
+        raise ValueError("Paired comparison cannot be both fifth and sixth.")
+    basename = (
+        "mag_cv_paired_fifth_vs_sixth" if sixth else
+        "mag_cv_paired_fourth_vs_fifth" if fifth else
+        "mag_cv_paired_comparison"
+    )
     output = figures_dir / basename
     image_path = plot_paired_localization(
         paired_rows, stats, output.with_suffix(".png")
@@ -547,7 +554,10 @@ def main():
     rows = load_summary(args.summary)
     summary = json.loads(args.summary.read_text(encoding="utf-8"))
     config = summary.get("training_configuration", {})
-    if config.get("architecture") == "residual-transition":
+    if config.get("architecture") == "dense-temporal":
+        name = "sexto entrenamiento: detector temporal denso"
+        filename = "mag_cv_dense_temporal_training.png"
+    elif config.get("architecture") == "residual-transition":
         name = "quinto entrenamiento: encoder residual y detector de transiciones"
         filename = "mag_cv_residual_transition_training.png"
     elif config.get("architecture") == "transition":
@@ -629,10 +639,14 @@ def main():
                     if prior.parent.name == "mag_cv_600windows_det10"
                     else "Cuarto entrenamiento"
                     if prior.parent.name == "mag_cv_transition_v1"
+                    else "Quinto entrenamiento"
+                    if prior.parent.name == "mag_cv_residual_transition_v1"
                     else prior.parent.name
                 )
                 comparison_filename = (
-                    "mag_cv_fourth_vs_fifth.png"
+                    "mag_cv_fifth_vs_sixth.png"
+                    if config.get("architecture") == "dense-temporal"
+                    else "mag_cv_fourth_vs_fifth.png"
                     if config.get("architecture") == "residual-transition"
                     else "mag_cv_second_vs_third.png"
                 )
@@ -653,6 +667,7 @@ def main():
                 paired_figure, paired_json = save_paired_localization(
                     pairs, stats, figures_dir,
                     fifth=(config.get("architecture") == "residual-transition"),
+                    sixth=(config.get("architecture") == "dense-temporal"),
                 )
                 print(f"Comparación emparejada: {paired_figure.resolve()}")
                 print(f"Métricas emparejadas: {paired_json.resolve()}")
