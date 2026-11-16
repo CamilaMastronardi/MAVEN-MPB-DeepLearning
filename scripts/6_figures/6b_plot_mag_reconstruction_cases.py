@@ -3,7 +3,8 @@
 
 A trained MAG model accepts 10-minute windows, NOT 70-minute inputs. This
 script uses the SAME number of spaced 10-minute windows as the saved outer-CV
-event evaluation (600 for the second training, 121 for the first). Each window has (1) reconstructed Bx/By/Bz/|B| and (2) a
+event evaluation (600 for the second, third and fourth trainings; 121 for
+the first). Each window has (1) reconstructed Bx/By/Bz/|B| and (2) a
 supervised MPB proximity score. Overlapping decoder outputs are averaged
 at original measurement timestamps to visualize the full 70-minute block.
 
@@ -43,7 +44,7 @@ trainer = import_module("scripts.5_training.5a_train_mag_cv")
 from src.detection.mag_autoencoder import MagSupervisedAutoencoder
 from src.detection.mag_transition_autoencoder import MagTransitionAutoencoder
 
-DEFAULT_RESULTS = Path("results/metrics/mag_cv_600windows_det10")
+DEFAULT_RESULTS = Path("results/metrics/mag_cv_600windows_det10_mag1_pat20_ep1000")
 DEFAULT_NORMALIZERS = Path("results/metrics/fold_normalization")
 DEFAULT_MANIFEST = Path("data/splits/cv4_monthly_manifest.csv")
 GIB = 1024**3
@@ -297,7 +298,8 @@ def plot_cases(cases, out):
     colors = {
         "real": "#30343B", "recon": "#346FA4",
         "true": "#2A875D", "peak": "#D16D36",
-        "target": "#868B95", "score": "#2C5592"
+        "target": "#868B95", "score": "#2C5592",
+        "vector_norm": "#8D4F9D"
     }
 
     for column, (kind, event, times, values, output, peak, best_epoch) in enumerate(cases):
@@ -325,6 +327,18 @@ def plot_cases(cases, out):
                 ax.plot(time_min, output["reconstruction_nt"][:, row],
                         color=colors["recon"], linewidth=0.85,
                         label="Reconstrucción CNN", zorder=3)
+                if row == 3:
+                    # This is the magnitude of the *blended* reconstructed
+                    # vector field, not an invented fifth measurement.
+                    reconstructed_xyz_norm = np.linalg.norm(
+                        output["reconstruction_nt"][:, :3], axis=1
+                    )
+                    ax.plot(
+                        time_min, reconstructed_xyz_norm,
+                        color=colors["vector_norm"], linestyle="--",
+                        linewidth=1.0,
+                        label="Módulo de Bxyz reconstruido", zorder=4
+                    )
                 ax.set_ylabel(channels[row] + " (nT)")
             else:
                 ax.plot(score_time_min, output["target"], color=colors["target"],
@@ -347,6 +361,8 @@ def plot_cases(cases, out):
     handles = [
         Line2D([], [], color=colors["real"], lw=1.3, label="MAG medido"),
         Line2D([], [], color=colors["recon"], lw=1.5, label="Reconstrucción (nT)"),
+        Line2D([], [], color=colors["vector_norm"], ls="--", lw=1.5,
+               label="Módulo de componentes reconstruidas"),
         Patch(facecolor=colors["true"], alpha=0.30,
               label="Ventana ±5 min alrededor de MPB catalogada"),
         Patch(facecolor=colors["peak"], alpha=0.30,
@@ -361,7 +377,7 @@ def plot_cases(cases, out):
         fontsize=15, fontweight="bold", y=0.99
     )
     fig.legend(handles=handles, loc="upper center",
-               bbox_to_anchor=(0.5, 0.955), ncol=3, frameon=False, fontsize=9)
+               bbox_to_anchor=(0.5, 0.955), ncol=4, frameon=False, fontsize=8.5)
     fig.text(
         0.5, 0.025,
         "Cada serie abarca 70 min. Reconstrucción: promedio de ventanas "
@@ -471,6 +487,28 @@ def main():
               flush=True)
 
     plot_cases(results, args.output)
+
+    def magnitude_diagnostics(observed, reconstructed):
+        """Errors in physical nT from actual covered measurement epochs only."""
+        valid = np.isfinite(reconstructed).all(axis=1)
+        if not np.any(valid):
+            return {
+                "rmse_decoded_magnitude_nt": None,
+                "rmse_vector_magnitude_nt": None,
+                "rmse_magnitude_consistency_nt": None,
+            }
+        mag_channel = reconstructed[valid, 3]
+        vector_magnitude = np.linalg.norm(reconstructed[valid, :3], axis=1)
+        real_mag = observed[valid, 3]
+        return {
+            "rmse_decoded_magnitude_nt":
+                float(np.sqrt(np.mean((mag_channel - real_mag) ** 2))),
+            "rmse_vector_magnitude_nt":
+                float(np.sqrt(np.mean((vector_magnitude - real_mag) ** 2))),
+            "rmse_magnitude_consistency_nt":
+                float(np.sqrt(np.mean((vector_magnitude - mag_channel) ** 2))),
+        }
+
     metadata = {
         "figure": str(args.output),
         "experiment": str(args.results_dir),
@@ -484,17 +522,28 @@ def main():
             "best_epoch": best_epoch,
             "n_scored_windows": len(output["scores"]),
             "n_real_epochs": len(times),
+            "magnitude_rmse": magnitude_diagnostics(
+                values, output["reconstruction_nt"]
+            ),
         } for kind, case, times, values, output, peak, best_epoch in results],
         "notes": [
             "MAG measurements are not saved; only PNG and this metadata.",
             "Reconstruction is average of overlapping 600-s CNN decodings.",
             "The label and prediction bands show centered 600-s windows.",
             "The supervised score is NOT a calibrated MPB probability.",
+            "Magnitude metrics are computed on 70-min reconstruction averages.",
+            "Vector-derived |B| is computed from the reconstructed xyz components.",
         ],
     }
     sidecar = args.output.with_suffix(".json")
     sidecar.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     print(f"Figure saved: {args.output.resolve()}", flush=True)
+    for item in metadata["cases"]:
+        print(
+            f"{item['kind'].upper()} fold {item['fold']} "
+            f"magnitude RMSE (nT): {item['magnitude_rmse']}",
+            flush=True
+        )
     print(f"Selection metadata: {sidecar.resolve()}", flush=True)
 
 
