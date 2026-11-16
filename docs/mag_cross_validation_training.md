@@ -1,3 +1,17 @@
+## Quinto modelo MAG: encoder residual y datos MAG cacheados
+
+Nueva arquitectura experimental en `src/detection/mag_residual_transition_autoencoder.py`
+(7 bloques convolucionales residuales, 32 canales ocultos, 8 latentes, el
+mismo detector asimétrico y los mismos folds y pérdidas que en el cuarto).
+El nuevo launcher `scripts/5_training/run_mag_cv_residual.sh` activa el
+almacenamiento persistente de observaciones originales en
+`data/cache/mag_events/` (excluidas de Git), con integridad y procedencia
+verificadas. No toca el entrenamiento del cuarto modelo.
+
+**Leer el protocolo y comandos completos en `docs/mag_fifth_training.md`.**
+
+---
+
 ## Cuarto entrenamiento MAG — cambio de arquitectura 1/3: detector antes/después
 
 El primer cambio arquitectónico se implementa como experimento **separado**,
