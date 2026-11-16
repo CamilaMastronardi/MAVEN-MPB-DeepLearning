@@ -3,7 +3,10 @@
 No synthetic MAVEN measurements, model training, or BigQuery requests.
 """
 import importlib
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from datetime import datetime, timezone
 
 figure = importlib.import_module(
@@ -30,6 +33,38 @@ class MagCaseSelectionTests(unittest.TestCase):
         self.assertAlmostEqual(predicted, 10.)
         with self.assertRaises(RuntimeError):
             figure.verify_saved_prediction(event, t.timestamp() + 100.)
+
+    def test_second_training_reads_600_centers_from_summary(self):
+        with tempfile.TemporaryDirectory() as folder:
+            base = Path(folder)
+            summary = {
+                "instrument": "MAG",
+                "pilot_subset": False,
+                "completed_folds": [1, 2, 3, 4],
+                "training_configuration": {
+                    "val_centers_per_event": 600, "sigma_seconds": 60.0
+                },
+            }
+            (base / "cv_summary.json").write_text(
+                json.dumps(summary), encoding="utf-8"
+            )
+            centers, sigma = figure.load_evaluation_config(base)
+            self.assertEqual(centers, 600)
+            self.assertEqual(sigma, 60.)
+
+    def test_first_training_uses_saved_original_defaults(self):
+        with tempfile.TemporaryDirectory() as folder:
+            base = Path(folder)
+            summary = {
+                "instrument": "MAG", "pilot_subset": False,
+                "completed_folds": [1, 2, 3, 4]
+            }
+            (base / "cv_summary.json").write_text(
+                json.dumps(summary), encoding="utf-8"
+            )
+            centers, sigma = figure.load_evaluation_config(base)
+            self.assertEqual(centers, 121)
+            self.assertEqual(sigma, 60.)
 
     def test_missing_good_or_bad_case(self):
         t = datetime(2020, 1, 1, tzinfo=timezone.utc)
