@@ -66,5 +66,41 @@ class MagCVOfflineTests(unittest.TestCase):
         self.assertTrue(all(x["fold"] == 1 for x in val))
 
 
+    def test_inner_early_stopping_split_uses_distinct_months(self):
+        rows = [
+            {"month_block": f"2020-{month:02d}",
+             "time": datetime(2020, month, 15, tzinfo=timezone.utc),
+             "source_group": "Group1", "mag_available": "1",
+             "fold": month % 4 + 1}
+            for month in range(1, 13)
+        ]
+        fit, monitor, excluded = trainer.split_inner_monitor_months(
+            rows, fold=1, seed=42
+        )
+        self.assertTrue(fit)
+        self.assertTrue(monitor)
+        self.assertEqual(len(fit) + len(monitor) + excluded, len(rows))
+        self.assertFalse(
+            {x["month_block"] for x in fit} &
+            {x["month_block"] for x in monitor}
+        )
+        trainer.check_disjoint_supports(fit, monitor)
+
+    def test_monitor_centers_include_near_and_far(self):
+        from types import SimpleNamespace
+        event = {"time": datetime(2020, 1, 15, tzinfo=timezone.utc)}
+        offsets = [-1200., -600., -120., -60., 0., 60., 120., 600., 1200.]
+        windows = [
+            SimpleNamespace(offset_from_nearest_mpb_s=offset,
+                            center_s=offset)
+            for offset in offsets
+        ]
+        result = trainer.monitoring_windows([(event, windows)], 5)
+        self.assertEqual(len(result), 5)
+        self.assertTrue(any(abs(x.offset_from_nearest_mpb_s) <= 180 for x in result))
+        self.assertTrue(any(abs(x.offset_from_nearest_mpb_s) > 180 for x in result))
+
+
+
 if __name__ == "__main__":
     unittest.main()
