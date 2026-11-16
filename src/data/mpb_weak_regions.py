@@ -30,7 +30,9 @@ def region_orientation(event):
     """Use chronological BS/MPB association, not MAG-derived answers."""
     mpb = event["time"].timestamp()
     bs = event["bs_time"].timestamp()
-    if not np.isfinite(bs) or abs(bs - mpb) < 300:
+    # Require a plausible paired orbital crossing, avoiding the one
+    # extremely distant BS association found in the catalog (>2 h).
+    if not np.isfinite(bs) or not (300. <= abs(bs - mpb) <= 7200.):
         return None
     # Entering Mars: BS -> sheath -> MPB -> induced.
     # Leaving Mars: induced -> MPB -> sheath -> BS.
