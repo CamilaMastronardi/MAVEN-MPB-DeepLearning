@@ -624,9 +624,13 @@ def main():
                         "Comparison requires identical validation-center counts; "
                         f"found {centers_current} vs {centers_previous}."
                     )
-                previous_name = ("Segundo entrenamiento"
-                                 if prior.parent.name == "mag_cv_600windows_det10"
-                                 else prior.parent.name)
+                previous_name = (
+                    "Segundo entrenamiento"
+                    if prior.parent.name == "mag_cv_600windows_det10"
+                    else "Cuarto entrenamiento"
+                    if prior.parent.name == "mag_cv_transition_v1"
+                    else prior.parent.name
+                )
                 comparison_filename = (
                     "mag_cv_fourth_vs_fifth.png"
                     if config.get("architecture") == "residual-transition"
