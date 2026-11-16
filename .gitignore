@@ -12,6 +12,8 @@ venv/
 # Data and generated outputs
 data/raw/*
 data/processed/*
+# Local compressed MAG event cache; potentially large scientific datasets.
+data/cache/
 data/labels/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
