@@ -55,7 +55,9 @@ La red MAG se entrenó para ventanas de **600 s**, no de 70 minutos.
 El script recupera 70 minutos de datos reales alrededor de cada etiqueta,
 reproduce las **121 ventanas de 600 s** de la evaluación externa por evento,
 calcula la reconstrucción en nT en cada una y promedia las porciones
-solapadas en los mismos instantes nativos. Si no hay ventanas válidas,
+solapadas en los mismos instantes nativos. Los **centros** evaluables
+están aproximadamente entre −30 y +30 min porque cada ventana
+necesita 5 min a cada lado; los datos observados abarcan ±35 min. Si no hay ventanas válidas,
 quedan huecos sin interpolar. **No se vuelve a entrenar.**
 
 La figura tiene dos columnas (caso bueno y malo) y cinco filas:
