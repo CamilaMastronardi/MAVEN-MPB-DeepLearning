@@ -316,6 +316,220 @@ def plot_fold_comparison(current, previous, path: Path, *,
 
 
 
+
+def load_localization_events(results_dir: Path):
+    """Read signed and absolute peak errors, keyed by exact fold/MPB timestamp."""
+    records = {}
+    for fold in range(1, 5):
+        path = results_dir / f"fold_{fold:02d}_event_metrics.csv"
+        with path.open(newline="", encoding="utf-8") as handle:
+            reader = csv.DictReader(handle)
+            required = {
+                "mpb_timestamp_utc", "source_group", "n_windows",
+                "peak_offset_s", "absolute_error_s"
+            }
+            if not required.issubset(set(reader.fieldnames or ())):
+                raise ValueError(f"Missing event columns in {path}.")
+            for row in reader:
+                key = (fold, row["mpb_timestamp_utc"])
+                if key in records:
+                    raise ValueError(f"Duplicate validation event: {key}.")
+                n_windows = int(row["n_windows"])
+                if n_windows < 1:
+                    raise ValueError(
+                        f"Unevaluable event in comparison: {key}; "
+                        "use a matched full validation catalog."
+                    )
+                absolute = float(row["absolute_error_s"])
+                signed = float(row["peak_offset_s"])
+                if not (np.isfinite(absolute) and np.isfinite(signed)
+                        and absolute >= 0 and
+                        abs(absolute - abs(signed)) < 0.002):
+                    raise ValueError(f"Invalid or inconsistent peak error: {key}.")
+                records[key] = {
+                    "fold": fold,
+                    "mpb_timestamp_utc": key[1],
+                    "source_group": row["source_group"],
+                    "absolute_error_s": absolute,
+                    "peak_offset_s": signed,
+                    "n_windows": n_windows,
+                }
+    return records
+
+
+def paired_localization_statistics(previous, current):
+    """Match identical held-out MPBs, never compare independent populations."""
+    if set(previous) != set(current):
+        gone = set(previous) - set(current)
+        added = set(current) - set(previous)
+        raise ValueError(
+            f"Unmatched validation MPBs: {len(gone)} only previous, "
+            f"{len(added)} only current."
+        )
+    if not previous:
+        raise ValueError("Empty CV event comparison.")
+    keys = sorted(previous)
+    for key in keys:
+        if previous[key]["source_group"] != current[key]["source_group"]:
+            raise ValueError(f"Source group changed for event {key}.")
+        if previous[key]["n_windows"] != current[key]["n_windows"]:
+            raise ValueError(f"Different evaluation-center count for event {key}.")
+
+    before = np.array(
+        [previous[key]["absolute_error_s"] for key in keys], dtype=float
+    )
+    after = np.array(
+        [current[key]["absolute_error_s"] for key in keys], dtype=float
+    )
+    offset_before = np.array(
+        [previous[key]["peak_offset_s"] for key in keys], dtype=float
+    )
+    offset_after = np.array(
+        [current[key]["peak_offset_s"] for key in keys], dtype=float
+    )
+    delta = after - before  # Negative = improved localization.
+    improved = int(np.count_nonzero(delta < -0.002))
+    worsened = int(np.count_nonzero(delta > 0.002))
+    unchanged = len(delta) - improved - worsened
+    previous_only = int(np.count_nonzero((before <= 60) & (after > 60)))
+    current_only = int(np.count_nonzero((before > 60) & (after <= 60)))
+    both_accurate = int(np.count_nonzero((before <= 60) & (after <= 60)))
+    results = {
+        "n_paired_events": len(keys),
+        "previous_median_error_s": float(np.median(before)),
+        "current_median_error_s": float(np.median(after)),
+        "median_paired_error_change_s": float(np.median(delta)),
+        "mean_paired_error_change_s": float(np.mean(delta)),
+        "improved_events": improved,
+        "worsened_events": worsened,
+        "unchanged_events": unchanged,
+        "previous_within_60s": int(np.count_nonzero(before <= 60)),
+        "current_within_60s": int(np.count_nonzero(after <= 60)),
+        "previous_only_within_60s": previous_only,
+        "current_only_within_60s": current_only,
+        "both_within_60s": both_accurate,
+        "previous_peaks_near_interval_edges_25to30min": int(
+            np.count_nonzero(np.abs(offset_before) >= 1500)
+        ),
+        "current_peaks_near_interval_edges_25to30min": int(
+            np.count_nonzero(np.abs(offset_after) >= 1500)
+        ),
+    }
+    for limit in (120, 300, 600):
+        results[f"previous_within_{limit}s"] = int(np.count_nonzero(before <= limit))
+        results[f"current_within_{limit}s"] = int(np.count_nonzero(after <= limit))
+    paired_rows = [
+        {
+            "fold": key[0],
+            "mpb_timestamp_utc": key[1],
+            "source_group": previous[key]["source_group"],
+            "previous_abs_error_s": float(before[i]),
+            "current_abs_error_s": float(after[i]),
+            "change_current_minus_previous_s": float(delta[i]),
+            "previous_peak_offset_s": float(offset_before[i]),
+            "current_peak_offset_s": float(offset_after[i]),
+        }
+        for i, key in enumerate(keys)
+    ]
+    return results, paired_rows
+
+
+def plot_paired_localization(paired_rows, stats, out_path: Path):
+    """Paired improvement, accuracy and edge-selection diagnostics."""
+    prior = np.array([x["previous_abs_error_s"] for x in paired_rows]) / 60
+    newer = np.array([x["current_abs_error_s"] for x in paired_rows]) / 60
+    changes = newer - prior
+    prev_offset = np.array(
+        [x["previous_peak_offset_s"] for x in paired_rows]
+    ) / 60
+    new_offset = np.array(
+        [x["current_peak_offset_s"] for x in paired_rows]
+    ) / 60
+    fig, axs = plt.subplots(2, 2, figsize=(12.4, 10.1),
+                            layout="constrained")
+    max_error = max(30., float(np.max(np.concatenate([prior, newer])))) + .5
+    axs[0, 0].scatter(prior, newer, s=9, alpha=.5)
+    axs[0, 0].plot([0, max_error], [0, max_error],
+                   color="black", linestyle="--", lw=1.1)
+    axs[0, 0].set_xlim(0, max_error)
+    axs[0, 0].set_ylim(0, max_error)
+    axs[0, 0].set_xlabel("Error absoluto anterior (min)")
+    axs[0, 0].set_ylabel("Error absoluto actual (min)")
+    axs[0, 0].set_title("(a) Cada MPB comparada consigo misma")
+    axs[0, 0].text(.02, .98, "Bajo diagonal = mejora",
+                   va="top", transform=axs[0, 0].transAxes, fontsize=9)
+
+    bins = np.linspace(-max_error, max_error, 51)
+    axs[0, 1].hist(changes, bins=bins, edgecolor="white")
+    axs[0, 1].axvline(0, linestyle="--", color="black")
+    axs[0, 1].set_xlabel("Cambio del error (actual - anterior, min)")
+    axs[0, 1].set_ylabel("Cantidad de MPB")
+    axs[0, 1].set_title(
+        "(b) Mejora/empeoramiento: "
+        f"{stats['improved_events']}/{stats['worsened_events']}"
+    )
+
+    thresholds = np.arange(0., max_error + .1, .25)
+    for values, label in ((prior, "Anterior"), (newer, "Actual")):
+        cum = np.searchsorted(np.sort(values), thresholds, side="right")
+        axs[1, 0].plot(
+            thresholds, 100 * cum / len(values), linewidth=1.8, label=label
+        )
+    axs[1, 0].set_xlim(0, max_error)
+    axs[1, 0].set_ylim(0, 101)
+    axs[1, 0].set_xlabel("Tolerancia de localización (min)")
+    axs[1, 0].set_ylabel("MPB dentro del umbral (%)")
+    axs[1, 0].set_title("(c) Fracción acumulada, mismos eventos")
+    axs[1, 0].legend()
+
+    offset_bins = np.arange(-30., 30.01, 2.)
+    axs[1, 1].hist(
+        prev_offset, bins=offset_bins, histtype="step", linewidth=1.7,
+        label="Anterior"
+    )
+    axs[1, 1].hist(
+        new_offset, bins=offset_bins, histtype="step", linewidth=1.7,
+        label="Actual"
+    )
+    axs[1, 1].axvline(0, color="gray", linestyle="--")
+    axs[1, 1].set_xlabel("Máximo predicho respecto a MPB catalogada (min)")
+    axs[1, 1].set_ylabel("Cantidad de MPB")
+    axs[1, 1].set_title("(d) Sesgo temporal y máximos en extremos")
+    axs[1, 1].legend()
+
+    for ax in axs.ravel():
+        ax.grid(alpha=.2)
+    fig.suptitle(
+        f"MAG — comparación emparejada de {stats['n_paired_events']} cruces "
+        "MPB en validación externa",
+        fontsize=14, fontweight="bold"
+    )
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    return out_path
+
+
+def save_paired_localization(paired_rows, stats, figures_dir, *, fifth=False):
+    basename = ("mag_cv_paired_fourth_vs_fifth" if fifth
+                else "mag_cv_paired_comparison")
+    output = figures_dir / basename
+    image_path = plot_paired_localization(
+        paired_rows, stats, output.with_suffix(".png")
+    )
+    output.with_suffix(".json").write_text(
+        json.dumps(stats, indent=2, sort_keys=True), encoding="utf-8"
+    )
+    with output.with_suffix(".csv").open(
+        "w", newline="", encoding="utf-8"
+    ) as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(paired_rows[0]))
+        writer.writeheader()
+        writer.writerows(paired_rows)
+    return image_path, output.with_suffix(".json")
+
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--summary", type=Path, default=DEFAULT_RESULTS / "cv_summary.json",
@@ -425,6 +639,32 @@ def main():
                 )
                 print(f"Comparación {previous_name} vs {name}: "
                       f"{compared.resolve()}")
+
+                # Paired analysis: identical MPBs evaluated by both models.
+                earlier_events = load_localization_events(prior.parent)
+                current_events = load_localization_events(args.summary.parent)
+                stats, pairs = paired_localization_statistics(
+                    earlier_events, current_events
+                )
+                paired_figure, paired_json = save_paired_localization(
+                    pairs, stats, figures_dir,
+                    fifth=(config.get("architecture") == "residual-transition"),
+                )
+                print(f"Comparación emparejada: {paired_figure.resolve()}")
+                print(f"Métricas emparejadas: {paired_json.resolve()}")
+                print(f"MPB mejoradas/empeoradas/iguales: "
+                      f"{stats['improved_events']}/"
+                      f"{stats['worsened_events']}/"
+                      f"{stats['unchanged_events']}")
+                print(f"MPB ≤60 s anterior/actual: "
+                      f"{stats['previous_within_60s']}/"
+                      f"{stats['current_within_60s']}")
+                print(f"Ganadas/perdidas en ≤60 s: "
+                      f"{stats['current_only_within_60s']}/"
+                      f"{stats['previous_only_within_60s']}")
+                print(f"Máximos a ≥25 min de la etiqueta, anterior/actual: "
+                      f"{stats['previous_peaks_near_interval_edges_25to30min']}/"
+                      f"{stats['current_peaks_near_interval_edges_25to30min']}")
 
 
 if __name__ == "__main__":
