@@ -40,6 +40,10 @@ fitter = import_module("scripts.4_preprocessing.4c_fit_fold_normalizers")
 from src.detection.mag_autoencoder import MagSupervisedAutoencoder
 from src.detection.mag_transition_autoencoder import MagTransitionAutoencoder
 from src.detection.mag_residual_transition_autoencoder import MagResidualTransitionAutoencoder
+from src.detection.mag_dense_temporal_autoencoder import MagDenseTemporalAutoencoder
+from src.detection.mag_temporal_scoring import (
+    dense_weighted_mse, dense_loss_sums, DenseNativeScoreFusion,
+)
 from src.data.mag_event_cache import MagEventCache
 
 DEFAULT_MANIFEST = Path("data/splits/cv4_monthly_manifest.csv")
@@ -58,9 +62,9 @@ def parser():
     p.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)
     p.add_argument("--folds", choices=("all", "1", "2", "3", "4"), default="all")
     p.add_argument("--architecture",
-                   choices=("baseline", "transition", "residual-transition"),
+                   choices=("baseline", "transition", "residual-transition", "dense-temporal"),
                    default="baseline",
-                   help="Baseline, v4 transition head, or v5 deeper residual transition encoder.")
+                   help="Baseline, v4 scalar transition, v5 residual scalar, or v6 dense temporal.")
     p.add_argument("--transition-side-offset-s", type=float, default=120.,
                    help="Before/after pooling lobes centered at +/- this many seconds.")
     p.add_argument("--transition-center-exclusion-s", type=float, default=15.,
@@ -118,7 +122,7 @@ def parser():
     if (a.max_train_events < 0 or a.max_val_events < 0
             or a.lambda_detection < 0 or a.early_stop_min_delta < 0):
         p.error("Invalid subset counts or detection-loss multiplier.")
-    if (a.architecture in ("transition", "residual-transition")
+    if (a.architecture in ("transition", "residual-transition", "dense-temporal")
             and not (0 <= a.transition_center_exclusion_s
                      < a.transition_side_offset_s)):
         p.error("Transition model requires 0 <= center exclusion < side offset.")
@@ -231,12 +235,18 @@ def signature(args, fold, train, val, normalizer_sha):
         "inner_month_holdout_fraction": 0.10,
     }
     # Preserve the *exact* original signature for in-progress baseline folds.
-    if args.architecture in ("transition", "residual-transition"):
+    if args.architecture in ("transition", "residual-transition", "dense-temporal"):
         if args.architecture == "transition":
             cfg["architecture"] = "MAG-CNN-latent2-before-after-v1"
-        else:
+        elif args.architecture == "residual-transition":
             cfg["architecture"] = "MAG-CNN-residual-hidden32-latent8-transition-v1"
             cfg["encoder_dilations"] = [1, 2, 4, 8, 16, 32, 64]
+        else:
+            cfg["architecture"] = "MAG-CNN-residual-hidden32-latent8-dense-temporal-v1"
+            cfg["encoder_dilations"] = [1, 2, 4, 8, 16, 32, 64]
+            cfg["temporal_output"] = "per-native-sample"
+            cfg["temporal_eval"] = "mean-over-overlapping-windows-1800s"
+            cfg["temporal_labels"] = "gaussian-to-nearest-center-annotation"
         cfg["transition_side_offset_s"] = args.transition_side_offset_s
         cfg["transition_center_exclusion_s"] = args.transition_center_exclusion_s
     # Cache is only an I/O optimization, not a scientific model hyperparameter.
@@ -254,6 +264,11 @@ def build_mag_model(args):
         )
     if args.architecture == "residual-transition":
         return MagResidualTransitionAutoencoder(
+            side_offset_s=args.transition_side_offset_s,
+            center_exclusion_s=args.transition_center_exclusion_s,
+        )
+    if args.architecture == "dense-temporal":
+        return MagDenseTemporalAutoencoder(
             side_offset_s=args.transition_side_offset_s,
             center_exclusion_s=args.transition_center_exclusion_s,
         )
@@ -493,9 +508,15 @@ def training_epoch(model, optimizer, event_pools, blocks, normalizer,
         optimizer.zero_grad(set_to_none=True)
         _, recon, pred = model(batch.x, batch.time_mask, batch.rel_time_s)
         rec = batching.masked_reconstruction_mse(recon, batch)
-        det = batching.weighted_proximity_mse(
-            pred, batch, near_label_weight=args.near_label_weight
-        )
+        if args.architecture == "dense-temporal":
+            det = dense_weighted_mse(
+                pred, batch, sigma_seconds=args.sigma_seconds,
+                near_label_weight=args.near_label_weight
+            )
+        else:
+            det = batching.weighted_proximity_mse(
+                pred, batch, near_label_weight=args.near_label_weight
+            )
         mag = batching.masked_mag_modulus_mse(recon, batch, normalizer)
         loss = (rec + args.lambda_detection * det
                 + args.lambda_magnitude * mag)
@@ -534,28 +555,51 @@ def validate_fold(model, val_windows, normalizer, args, device):
                 "peak_score": "", "target_mse_weighted": ""
             })
             continue
+        dense = args.architecture == "dense-temporal"
         centers, predictions = [], []
+        fusion = (
+            DenseNativeScoreFusion(windows, row["time"].timestamp(),
+                                   radius_s=CENTER_RANGE_S)
+            if dense else None
+        )
         event_werr = event_wtotal = 0.
         for pos in range(0, len(windows), args.batch_size):
             pack = windows[pos:pos+args.batch_size]
             batch = make_batch(pack, normalizer, device)
             _, _, scores = model(batch.x, batch.time_mask, batch.rel_time_s)
-            target = batch.y
-            weight = 1 + (args.near_label_weight-1)*target
-            err = (weight*(scores-target).square()).sum().item()
-            wtot = weight.sum().item()
+            if dense:
+                err, wtot = dense_loss_sums(
+                    scores, batch, sigma_seconds=args.sigma_seconds,
+                    near_label_weight=args.near_label_weight
+                )
+                individual = scores.detach().cpu().numpy()
+                for j, window in enumerate(pack):
+                    fusion.add_window(
+                        window, individual[j, :len(window.data)]
+                    )
+            else:
+                target = batch.y
+                weight = 1 + (args.near_label_weight-1)*target
+                err = (weight*(scores-target).square()).sum().item()
+                wtot = weight.sum().item()
+                centers.extend(w.center_s for w in pack)
+                predictions.extend(float(x) for x in scores.flatten().cpu())
             event_werr += err
             event_wtotal += wtot
-            centers.extend(w.center_s for w in pack)
-            predictions.extend(float(x) for x in scores.flatten().cpu())
-        peak_index = int(np.argmax(predictions))
-        offset = centers[peak_index]-row["time"].timestamp()
+        if dense:
+            merged = fusion.finish()
+            offset = merged["peak_offset_s"]
+            peak_score = merged["peak_score"]
+        else:
+            peak_index = int(np.argmax(predictions))
+            offset = centers[peak_index]-row["time"].timestamp()
+            peak_score = predictions[peak_index]
         event_rows.append({
             "mpb_timestamp_utc": row["time"].isoformat(),
             "source_group": row["source_group"], "n_windows": len(windows),
             "peak_offset_s": float(offset),
             "absolute_error_s": float(abs(offset)),
-            "peak_score": predictions[peak_index],
+            "peak_score": peak_score,
             "target_mse_weighted": event_werr/event_wtotal
         })
         weighted_error += event_werr
@@ -612,9 +656,17 @@ def evaluate_monitor(model, windows, normalizer, args, device):
         _, reconstruction, scores = model(
             batch.x, batch.time_mask, batch.rel_time_s
         )
-        weights = 1 + (args.near_label_weight-1) * batch.y
-        det_numerator += float((weights * (scores - batch.y).square()).sum())
-        det_denominator += float(weights.sum())
+        if args.architecture == "dense-temporal":
+            numer, denom = dense_loss_sums(
+                scores, batch, sigma_seconds=args.sigma_seconds,
+                near_label_weight=args.near_label_weight
+            )
+            det_numerator += numer
+            det_denominator += denom
+        else:
+            weights = 1 + (args.near_label_weight-1) * batch.y
+            det_numerator += float((weights * (scores - batch.y).square()).sum())
+            det_denominator += float(weights.sum())
         # Reconstruction only on observed (unpadded) samples.
         mask = batch.time_mask[:, None, :].to(batch.x.dtype)
         rec_numerator += float(((reconstruction - batch.x).square() * mask).sum())
@@ -840,6 +892,10 @@ def train_fold(fold, selected, blocks, normalizer, run_sig, args, device,
         "lambda_magnitude": args.lambda_magnitude,
         "sigma_seconds": args.sigma_seconds,
         "architecture": args.architecture,
+        "score_resolution": (
+            "native-time-overlap-averaged"
+            if args.architecture == "dense-temporal" else "one-per-window"
+        ),
         "trainable_parameters": n_parameters,
         "val_events_selected": len(val), "train_history": history,
         "pilot_subset": bool(args.max_train_events or args.max_val_events),
@@ -849,18 +905,18 @@ def train_fold(fold, selected, blocks, normalizer, run_sig, args, device,
         "schema": 2, "fold": fold, "signature": run_sig,
         "best_epoch": best_epoch, "model": model.state_dict(), "config": {
             "sigma_seconds": args.sigma_seconds,
-            "hidden": 32 if args.architecture == "residual-transition" else 16,
-            "latent_channels": 8 if args.architecture == "residual-transition" else 2,
+            "hidden": 32 if args.architecture in ("residual-transition", "dense-temporal") else 16,
+            "latent_channels": 8 if args.architecture in ("residual-transition", "dense-temporal") else 2,
             "pooling_sigma_s": 90.0,
             "architecture": args.architecture,
             "transition_side_offset_s": (
                 args.transition_side_offset_s
-                if args.architecture in ("transition", "residual-transition")
+                if args.architecture in ("transition", "residual-transition", "dense-temporal")
                 else None
             ),
             "transition_center_exclusion_s": (
                 args.transition_center_exclusion_s
-                if args.architecture in ("transition", "residual-transition")
+                if args.architecture in ("transition", "residual-transition", "dense-temporal")
                 else None
             ),
         }
@@ -1005,6 +1061,10 @@ def main():
             "lambda_magnitude": args.lambda_magnitude,
             "near_label_weight": args.near_label_weight,
             "architecture": args.architecture,
+            "score_resolution": (
+                "native-time-overlap-averaged"
+                if args.architecture == "dense-temporal" else "one-per-window"
+            ),
             "trainable_parameters": results[min(results)].get("trainable_parameters"),
             "min_epochs": args.min_epochs,
             "max_epochs": args.epochs,
