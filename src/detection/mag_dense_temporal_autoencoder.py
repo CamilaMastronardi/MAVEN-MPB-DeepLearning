@@ -42,10 +42,11 @@ class MagDenseTemporalAutoencoder(MagResidualTransitionAutoencoder):
         )
         # A bounded temporal support centered +/-120 s, excluding the
         # +/-15-s region nearest the sample under classification.
-        self.before_start_s = -210.0
+        half_side_width_s = pooling_sigma_s
+        self.before_start_s = -side_offset_s - half_side_width_s
         self.before_end_s = -center_exclusion_s
         self.after_start_s = center_exclusion_s
-        self.after_end_s = 210.0
+        self.after_end_s = side_offset_s + half_side_width_s
         if not (self.before_start_s < self.before_end_s < 0
                 <= self.after_start_s < self.after_end_s):
             raise ValueError("Invalid asymmetric temporal pooling supports.")
