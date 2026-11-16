@@ -605,6 +605,12 @@ def train_fold(fold, selected, blocks, normalizer, run_sig, args, device,
               f"best epoch {best_epoch}.", flush=True)
 
     for epoch in range(start_epoch+1, args.epochs+1):
+        # If the previous process stopped after an early-stop checkpoint but
+        # before the final outer-fold evaluation, do not train extra epochs.
+        if stale_epochs >= args.early_stop_patience:
+            print(f"FOLD {fold}: previous checkpoint already met early "
+                  "stopping; proceeding to final evaluation.", flush=True)
+            break
         stats = training_epoch(model, optimizer, training_windows, normalizer,
                                args, device, fold, epoch)
         val_stats = evaluate_monitor(
