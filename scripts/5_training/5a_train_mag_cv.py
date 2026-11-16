@@ -53,7 +53,11 @@ def parser():
     p.add_argument("--normalizers-dir", type=Path, default=DEFAULT_NORMALIZERS)
     p.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)
     p.add_argument("--folds", choices=("all", "1", "2", "3", "4"), default="all")
-    p.add_argument("--epochs", type=int, default=3)
+    p.add_argument("--epochs", type=int, default=100)
+    p.add_argument("--early-stop-patience", type=int, default=10)
+    p.add_argument("--early-stop-min-delta", type=float, default=1e-4)
+    p.add_argument("--monitor-centers-per-event", type=int, default=21,
+                   help="Number of fixed validation centers per event to check per epoch.")
     p.add_argument("--batch-size", type=int, default=16)
     p.add_argument("--train-windows-per-event", type=int, default=24)
     p.add_argument("--val-centers-per-event", type=int, default=121)
@@ -79,14 +83,16 @@ def parser():
                    help="Actually read MAVEN and train. Default is estimate only.")
     a = p.parse_args()
     positive = [
-        a.epochs, a.batch_size, a.train_windows_per_event,
+        a.epochs, a.early_stop_patience, a.monitor_centers_per_event,
+        a.batch_size, a.train_windows_per_event,
         a.val_centers_per_event, a.sigma_seconds, a.near_radius_seconds,
         a.near_label_weight, a.learning_rate, a.max_query_gib,
         a.max_total_gib, a.max_returned_rows, a.torch_threads
     ]
     if any(v <= 0 for v in positive) or a.near_label_weight < 1:
         p.error("All sizes, time scales, rates, and byte limits must be positive.")
-    if a.max_train_events < 0 or a.max_val_events < 0 or a.lambda_detection < 0:
+    if (a.max_train_events < 0 or a.max_val_events < 0
+            or a.lambda_detection < 0 or a.early_stop_min_delta < 0):
         p.error("Invalid subset counts or detection-loss multiplier.")
     if a.train_windows_per_event < 2:
         p.error("--train-windows-per-event must be >= 2.")
@@ -166,7 +172,7 @@ def fold_normalizer(path, manifest, rows, fold):
 
 def signature(args, fold, train, val, normalizer_sha):
     cfg = {
-        "schema": 1, "architecture": "MAG-CNN-latent2-v1",
+        "schema": 2, "architecture": "MAG-CNN-latent2-v1-earlystop",
         "fold": fold, "normalizer_sha256": normalizer_sha,
         "manifest_sha256": hashlib.sha256(args.manifest.read_bytes()).hexdigest(),
         "train_times": [r["time"].isoformat() for r in train],
@@ -179,6 +185,9 @@ def signature(args, fold, train, val, normalizer_sha):
         "near_label_weight": args.near_label_weight,
         "lambda_detection": args.lambda_detection,
         "learning_rate": args.learning_rate, "seed": args.seed,
+        "early_stop_patience": args.early_stop_patience,
+        "early_stop_min_delta": args.early_stop_min_delta,
+        "monitor_centers_per_event": args.monitor_centers_per_event,
     }
     return hashlib.sha256(json.dumps(cfg, sort_keys=True).encode()).hexdigest()
 
@@ -389,6 +398,57 @@ def validate_fold(model, val_windows, normalizer, args, device):
     }, event_rows
 
 
+
+def monitoring_windows(val_windows, per_event):
+    """Fixed, small per-event subset for validation every epoch.
+
+    Every available held-out event is used: this is not an event subset.
+    Including both near-label and distant windows avoids evaluating a model
+    only on one regime. Full event localization uses all val centers later.
+    """
+    result = []
+    near_count = (per_event + 1) // 2
+    for _, windows in val_windows:
+        if not windows:
+            continue
+        near = [w for w in windows if abs(w.offset_from_nearest_mpb_s) <= 180.]
+        far = [w for w in windows if abs(w.offset_from_nearest_mpb_s) > 180.]
+        chosen = select_spaced(near, near_count)
+        chosen.extend(select_spaced(far, per_event - len(chosen)))
+        if len(chosen) < per_event:
+            used = {w.center_s for w in chosen}
+            extra = [w for w in windows if w.center_s not in used]
+            chosen.extend(select_spaced(extra, per_event - len(chosen)))
+        result.extend(chosen)
+    return result
+
+
+@torch.no_grad()
+def evaluate_monitor(model, windows, normalizer, args, device):
+    """Fixed validation score used for early stopping (not a test set)."""
+    model.eval()
+    det_numerator = det_denominator = 0.0
+    rec_numerator = rec_denominator = 0.0
+    for i in range(0, len(windows), args.batch_size):
+        batch = make_batch(windows[i:i+args.batch_size], normalizer, device)
+        _, reconstruction, scores = model(
+            batch.x, batch.time_mask, batch.rel_time_s
+        )
+        weights = 1 + (args.near_label_weight-1) * batch.y
+        det_numerator += float((weights * (scores - batch.y).square()).sum())
+        det_denominator += float(weights.sum())
+        # Reconstruction only on observed (unpadded) samples.
+        mask = batch.time_mask[:, None, :].to(batch.x.dtype)
+        rec_numerator += float(((reconstruction - batch.x).square() * mask).sum())
+        rec_denominator += float(mask.sum()) * batch.x.shape[1]
+    if det_denominator == 0 or rec_denominator == 0:
+        raise ValueError("No evaluable held-out validation windows.")
+    return {
+        "val_det": det_numerator/det_denominator,
+        "val_rec": rec_numerator/rec_denominator,
+    }
+
+
 def save_json(path, object_value):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
@@ -457,11 +517,20 @@ def train_fold(fold, selected, blocks, normalizer, run_sig, args, device,
     model = MagSupervisedAutoencoder().to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
     checkpoint_path = args.output_dir / f"fold_{fold:02d}_last.pt"
+    best_path = args.output_dir / f"fold_{fold:02d}_best.pt"
     final_path = args.output_dir / f"fold_{fold:02d}_final.pt"
     metrics_path = args.output_dir / f"fold_{fold:02d}_metrics.json"
     event_path = args.output_dir / f"fold_{fold:02d}_event_metrics.csv"
     start_epoch = 0
     history = []
+    best_val = float("inf")
+    best_epoch = 0
+    stale_epochs = 0
+    monitor_windows = monitoring_windows(val_windows, args.monitor_centers_per_event)
+    print(f"FOLD {fold}: early stopping monitors {len(monitor_windows)} "
+          f"fixed held-out windows from ALL evaluable VAL events.", flush=True)
+    if not monitor_windows:
+        raise ValueError("No validation windows available to monitor.")
 
     if checkpoint_path.exists():
         if not args.resume:
@@ -475,26 +544,72 @@ def train_fold(fold, selected, blocks, normalizer, run_sig, args, device,
         optimizer.load_state_dict(state["optimizer"])
         start_epoch = int(state["epoch"])
         history = list(state["history"])
-        print(f"FOLD {fold}: resumed after epoch {start_epoch}.", flush=True)
+        best_val = float(state["best_val"])
+        best_epoch = int(state["best_epoch"])
+        stale_epochs = int(state["stale_epochs"])
+        if not best_path.exists():
+            raise RuntimeError("Best checkpoint is missing; refuse unsafe resume.")
+        print(f"FOLD {fold}: resumed after epoch {start_epoch}, "
+              f"best epoch {best_epoch}.", flush=True)
 
     for epoch in range(start_epoch+1, args.epochs+1):
         stats = training_epoch(model, optimizer, training_windows, normalizer,
                                args, device, fold, epoch)
-        history.append({"epoch": epoch, **stats})
+        val_stats = evaluate_monitor(
+            model, monitor_windows, normalizer, args, device
+        )
+        candidate = val_stats["val_det"]
+        improved = (best_epoch == 0 or
+                    candidate < best_val - args.early_stop_min_delta)
+        if improved:
+            best_val = candidate
+            best_epoch = epoch
+            stale_epochs = 0
+            save_checkpoint(best_path, {
+                "schema": 2, "fold": fold, "signature": run_sig,
+                "epoch": epoch, "best_val_det": best_val,
+                "model": model.state_dict()
+            })
+        else:
+            stale_epochs += 1
+
+        history.append({"epoch": epoch, **stats, **val_stats,
+                        "best_epoch_so_far": best_epoch})
         save_checkpoint(checkpoint_path, {
-            "schema": 1, "fold": fold, "signature": run_sig,
+            "schema": 2, "fold": fold, "signature": run_sig,
             "epoch": epoch, "model": model.state_dict(),
-            "optimizer": optimizer.state_dict(), "history": history
+            "optimizer": optimizer.state_dict(), "history": history,
+            "best_val": best_val, "best_epoch": best_epoch,
+            "stale_epochs": stale_epochs
         })
         print(f"FOLD {fold} EPOCH {epoch}/{args.epochs}: "
-              f"loss={stats['train_loss']:.5f} "
-              f"(recon={stats['train_rec']:.5f}, det={stats['train_det']:.5f})",
+              f"train_total={stats['train_loss']:.5f} "
+              f"train_det={stats['train_det']:.5f} "
+              f"val_det={val_stats['val_det']:.5f} "
+              f"val_rec={val_stats['val_rec']:.5f} "
+              f"best_epoch={best_epoch} stale={stale_epochs}",
               flush=True)
+        if stale_epochs >= args.early_stop_patience:
+            print(f"FOLD {fold}: early stopping after {epoch} epochs "
+                  f"(best epoch {best_epoch}).", flush=True)
+            break
+
+    if not best_path.exists():
+        raise RuntimeError("Training ended without a best-model checkpoint.")
+    best_state = torch.load(best_path, map_location=device, weights_only=False)
+    if best_state["signature"] != run_sig:
+        raise RuntimeError("Best checkpoint signature mismatch.")
+    model.load_state_dict(best_state["model"])
+    print(f"FOLD {fold}: evaluating FULL validation at best epoch "
+          f"{best_epoch}, not last weights.", flush=True)
 
     metrics, event_rows = validate_fold(model, val_windows, normalizer, args, device)
     result = {
         "schema": 1, "fold": fold, "signature": run_sig,
-        "epochs": args.epochs, "train_events_selected": len(train),
+        "epochs_max": args.epochs, "epochs_completed": len(history),
+        "best_epoch": best_epoch, "best_monitor_val_det": best_val,
+        "early_stopped": stale_epochs >= args.early_stop_patience,
+        "train_events_selected": len(train),
         "train_events_unusable": invalid_train,
         "train_windows": len(training_windows),
         "val_events_selected": len(val), "train_history": history,
@@ -502,8 +617,8 @@ def train_fold(fold, selected, blocks, normalizer, run_sig, args, device,
         **metrics,
     }
     save_checkpoint(final_path, {
-        "schema": 1, "fold": fold, "signature": run_sig,
-        "model": model.state_dict(), "config": {
+        "schema": 2, "fold": fold, "signature": run_sig,
+        "best_epoch": best_epoch, "model": model.state_dict(), "config": {
             "sigma_seconds": args.sigma_seconds, "hidden": 16,
             "latent_channels": 2, "pooling_sigma_s": 90.0,
         }
