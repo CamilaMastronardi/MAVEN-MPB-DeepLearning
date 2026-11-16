@@ -1,3 +1,78 @@
+## Cuarto entrenamiento MAG — cambio de arquitectura 1/3: detector antes/después
+
+El primer cambio arquitectónico se implementa como experimento **separado**,
+sin modificar el encoder ni el decoder de `MagSupervisedAutoencoder` ni
+interrumpir el tercer entrenamiento (regularización física del módulo).
+
+**Hipótesis:** una MPB debe producir cambios entre las regiones anteriores
+y posteriores al cruce, que una única representación latente central o un
+promedio simétrico podrían no expresar suficientemente.
+
+Nuevo módulo: `src/detection/mag_transition_autoencoder.py`.
+`MagTransitionAutoencoder` reutiliza exactamente el **encoder CNN de 16
+canales ocultos y 2 canales latentes**, y el mismo decoder de cuatro canales.
+Solo modifica las entradas del detector supervisado:
+
+```text
+z_center  = representación latente en el instante central
+z_before  = promedio gaussiano de z(t) en t < -15 s, centrado en -120 s
+z_after   = promedio gaussiano de z(t) en t > +15 s, centrado en +120 s
+delta_z   = z_after - z_before
+
+detector_input = concat(z_center, z_before, z_after, delta_z)
+score = MLP(detector_input) -> Sigmoid -> 1 puntaje por ventana
+```
+
+Las ponderaciones laterales tienen desviación `90 s` (sobre los tiempos
+**físicos**, no índices). Se excluye el padding con `time_mask`. Si una
+región carece de muestras válidas, el agregado correspondiente recurre
+al vector central; los bloques MAG completos aceptados por QC suelen
+tener muestras a ambos lados.
+
+Este cambio NO hace la red más profunda ni la convierte todavía
+en detector con una salida por segundo: esas son las modificaciones
+**2/3** y **3/3** a estudiar por separado.
+
+**Constantes para una comparación controlada con el tercer entrenamiento:**
+los 569 eventos, cuatro folds por mes, 600 etiquetas/centros por MPB,
+24 ventanas rotativas/evento/época, `sigma=60 s`, normalizadores,
+`L=L_rec+10L_det+L_mag`, hasta 1000 épocas, mínimo 25,
+paciencia 20, y selección por `val_det` interna.
+
+Se conservan los cuatro modelos anteriores sin sobreescribirlos.
+El launcher **del tercero** sigue siendo
+`scripts/5_training/run_mag_cv_full.sh`; el **del cuarto** es
+`scripts/5_training/run_mag_cv_transition.sh`, con carpeta nueva:
+
+```text
+results/metrics/mag_cv_transition_v1/
+```
+
+Ejecutar el cuarto cuando el tercero haya concluido y se hayan
+revisado sus resultados:
+
+```bash
+cd ~/Codigos/MAVEN-MPB-DeepLearning
+git pull origin main
+source .venv/bin/activate
+tmux new -s mag_cv_transition
+bash scripts/5_training/run_mag_cv_transition.sh
+```
+
+El programa prueba el código, estima las consultas y, si están dentro
+del límite, vuelve a recuperar datos reales MAG desde BigQuery: no se
+guardaron las series originales. La arquitectura se registra en las
+métricas y en el checkpoint final; para hacer las figuras posteriores
+se puede reutilizar `6a_plot_mag_cv_summary.py` y
+`6b_plot_mag_reconstruction_cases.py` apuntando a
+`--summary` o `--results-dir` de `mag_cv_transition_v1`.
+
+**Nota:** por ahora no hay resultados de entrenamiento de esta
+arquitectura. Su eficacia debe evaluarse empíricamente y sobre centros
+de validación idénticos a los del tercer modelo.
+
+---
+
 ## Tercer entrenamiento MAG: pérdida física de |B|, paciencia 20, máximo 1000 épocas
 
 **Configuración actual de `scripts/5_training/run_mag_cv_full.sh`** (los apartados
