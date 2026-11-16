@@ -261,3 +261,15 @@ El entrenamiento **no se ejecuta automáticamente**: requiere `--execute`.
 Comenzar con un **piloto restringido** en los cuatro folds y no interpretar
 estos resultados como validación completa. Ver
 [guía de entrenamiento MAG](docs/mag_cross_validation_training.md).
+
+## Figuras reproducibles del entrenamiento
+
+Los scripts de `scripts/6_figures/` generan figuras a partir de los archivos
+con métricas ya guardados. Para el primer entrenamiento completo MAG:
+
+```bash
+python scripts/6_figures/6a_plot_mag_cv_summary.py
+```
+
+Entrada `results/metrics/mag_cv_full/cv_summary.json`; salida
+`results/metrics/mag_cv_full/figures/mag_cv_first_training.png`.
