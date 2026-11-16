@@ -252,9 +252,32 @@ def load_event_blocks(rows, args):
         blocks[row["time"]][sensor] = (ts, values)
         if i % 50 == 0 or i == len(plans):
             print(f"FETCHED {i}/{len(plans)} sensor blocks.", flush=True)
+    joint_present = 0
+    no_swea = []
     for event_time, data in blocks.items():
         if set(data) != {"MAG", "SWEA"}:
             raise RuntimeError(f"Missing source data for {event_time}.")
+        if len(data["MAG"][0]) and len(data["SWEA"][0]):
+            joint_present += 1
+        elif not len(data["SWEA"][0]):
+            no_swea.append(event_time.isoformat())
+    print(
+        f"Measured MAG+SWEA joint event blocks: {joint_present}/{len(events)}; "
+        f"events with zero usable SWEA frames: {len(no_swea)}.",
+        flush=True
+    )
+    if no_swea:
+        safe_json(args.output_dir/"missing_swea_measurements.json", {
+            "no_usable_swea_event_times_utc": no_swea,
+            "note": ("SWEA availability in the catalog does not guarantee "
+                     "that its measured spectra were loaded into BigQuery.")
+        })
+    if joint_present < max(4, int(.5*len(events))):
+        raise RuntimeError(
+            "Insufficient measured SWEA coverage in BigQuery for the "
+            "selected v7 events. See missing_swea_measurements.json. "
+            "Do not fabricate spectra or silently evaluate MAG-only."
+        )
     return blocks
 
 
