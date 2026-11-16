@@ -283,3 +283,13 @@ Entrada `results/metrics/mag_cv_full/cv_summary.json`; salida
  del detector (puntaje no calibrado). Ejecutar con `--execute` para recuperar
  solo los dos eventos seleccionados y guardar la figura en
  `results/metrics/mag_cv_full/figures/`.
+
+## Segundo experimento MAG (600 centros, mayor peso de detección)
+
+El entrenamiento completo actual conserva 4 folds y todos los eventos,
+pero genera **hasta 600 etiquetas gaussianas por cruce** (una por centro
+de rolling window), recorre las etiquetas durante al menos 25 épocas y
+cambia el objetivo a `L = L_rec + 10 L_det`. El ancho de la gaussiana
+permanece en `sigma=60 s`; 60 era el ancho en segundos, no la cantidad
+de etiquetas. Resultados nuevos: `results/metrics/mag_cv_600windows_det10/`.
+El primer experimento, `mag_cv_full/`, se conserva intacto.
