@@ -384,3 +384,22 @@ bash scripts/5_training/run_mag_cv_residual.sh
 
 Resultados: `results/metrics/mag_cv_residual_transition_v1/`.
 Manual: `docs/mag_fifth_training.md`.
+
+## Sexto entrenamiento MAG — detección temporal densa
+
+Nueva arquitectura: reutiliza el encoder residual del quinto modelo pero
+produce **un puntaje por muestra MAG**, fusionado en timestamps nativos en las
+ventanas superpuestas. Pérdida supervisada gaussiana por muestra.
+
+**Early stopping desde época 15, paciencia 10**. Se entrenan 40 centros
+rotativos por evento y época, cubriendo los 600 centros al cumplir 15 épocas.
+Se mantienen los 569 cruces, la validación de cuatro folds y la caché MAG
+local del quinto entrenamiento.
+
+```bash
+git pull origin main
+bash scripts/5_training/run_mag_cv_dense_temporal.sh
+```
+
+Salida independiente: `results/metrics/mag_cv_dense_temporal_v1/`.
+Manual: `docs/mag_sixth_training.md`.
