@@ -273,3 +273,13 @@ python scripts/6_figures/6a_plot_mag_cv_summary.py
 
 Entrada `results/metrics/mag_cv_full/cv_summary.json`; salida
 `results/metrics/mag_cv_full/figures/mag_cv_first_training.png`.
+
+### Diagnóstico de reconstrucciones MAG en dos cruces reales
+
+`scripts/6_figures/6b_plot_mag_reconstruction_cases.py` genera, a partir
+ de los checkpoints finales y dos consultas MAG de 70 minutos, una figura
+ comparativa del caso de localización correcta e incorrecta. Incluye la
+ reconstrucción por ventanas solapadas de 10 min y la salida supervisada
+ del detector (puntaje no calibrado). Ejecutar con `--execute` para recuperar
+ solo los dos eventos seleccionados y guardar la figura en
+ `results/metrics/mag_cv_full/figures/`.
