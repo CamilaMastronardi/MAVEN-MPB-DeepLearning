@@ -263,7 +263,8 @@ def plot_event_error_distribution(errors, output_path: Path):
 
 def plot_fold_comparison(current, previous, path: Path, *,
                          current_label="Tercer entrenamiento",
-                         previous_label="Segundo entrenamiento"):
+                         previous_label="Segundo entrenamiento",
+                         dense_output=False):
     """Same-fold, same-sample-resolution CV comparison of MAG experiments."""
     if [int(r["fold"]) for r in current] != [int(r["fold"]) for r in previous]:
         raise ValueError("Comparison requires identical fold ordering.")
@@ -305,8 +306,13 @@ def plot_fold_comparison(current, previous, path: Path, *,
     fig.suptitle(f"MAG — {previous_label} vs {current_label}",
                  fontsize=14, fontweight="bold")
     fig.supxlabel(
-        "Mismas MPB y 600 ventanas de entrada por evento. "
-        "La versión temporal combina puntajes sobre tiempos MAG nativos.",
+        (
+            "Mismas MPB y 600 ventanas por evento. "
+            "V6 fusiona puntajes en tiempos MAG nativos; v5 usa centros."
+        ) if dense_output else (
+            "Mismos folds y resolución de centros. "
+            "Las diferencias pueden incluir cambios de entrenamiento."
+        ),
         fontsize=9
     )
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -654,6 +660,7 @@ def main():
                     rows, earlier, figures_dir / comparison_filename,
                     current_label=name,
                     previous_label=previous_name,
+                    dense_output=(config.get("architecture") == "dense-temporal"),
                 )
                 print(f"Comparación {previous_name} vs {name}: "
                       f"{compared.resolve()}")
