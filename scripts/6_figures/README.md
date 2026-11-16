@@ -211,3 +211,24 @@ respetando los límites configurados, y se agrega a la caché. Se puede
 indicar otra ubicación con `--mag-cache-dir` o desactivarla con
 `--no-mag-cache`. El flag `--execute` sigue siendo obligatorio para
 generar la figura, incluso si ambos eventos están cacheados.
+
+### Figuras del sexto modelo: salida temporal densa
+
+```bash
+python scripts/6_figures/6a_plot_mag_cv_summary.py \
+  --summary results/metrics/mag_cv_dense_temporal_v1/cv_summary.json \
+  --compare-to results/metrics/mag_cv_residual_transition_v1/cv_summary.json
+
+python scripts/6_figures/6b_plot_mag_reconstruction_cases.py \
+  --results-dir results/metrics/mag_cv_dense_temporal_v1 --execute
+```
+
+El resumen crea `mag_cv_dense_temporal_training.png`, las curvas de pérdidas,
+la distribución de errores y los gráficos comparativos
+`mag_cv_fifth_vs_sixth.png` y `mag_cv_paired_fifth_vs_sixth.png`, junto
+con CSV y JSON de diferencias por evento.
+
+En la reconstrucción `6b` se traza el puntaje **temporal fusionado en las
+muestras MAG nativas**, no solo 600 puntajes por centro de ventana. La
+comparación v5-v6 mantiene eventos y ventanas idénticas, pero cambia la
+resolución y agregación de la salida, así como el objetivo de entrenamiento.
