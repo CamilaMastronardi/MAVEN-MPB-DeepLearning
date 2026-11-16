@@ -413,12 +413,18 @@ def main():
                 previous_name = ("Segundo entrenamiento"
                                  if prior.parent.name == "mag_cv_600windows_det10"
                                  else prior.parent.name)
+                comparison_filename = (
+                    "mag_cv_fourth_vs_fifth.png"
+                    if config.get("architecture") == "residual-transition"
+                    else "mag_cv_second_vs_third.png"
+                )
                 compared = plot_fold_comparison(
-                    rows, earlier, figures_dir / "mag_cv_second_vs_third.png",
+                    rows, earlier, figures_dir / comparison_filename,
                     current_label=name,
                     previous_label=previous_name,
                 )
-                print(f"Comparación 2º vs 3º: {compared.resolve()}")
+                print(f"Comparación {previous_name} vs {name}: "
+                      f"{compared.resolve()}")
 
 
 if __name__ == "__main__":
