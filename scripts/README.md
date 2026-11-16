@@ -80,3 +80,16 @@ reanudación y métricas de localización, ver `docs/mag_cross_validation_traini
 **Inicio nocturno en tmux con un único comando:**
 `bash scripts/5_training/run_mag_cv_pilot.sh`. Este runner ejecuta las
 pruebas offline antes de consultar BigQuery y conserva logs/checkpoints.
+
+## 6. Figuras — `6_figures/`
+
+- `6a_plot_mag_cv_summary.py`: figura comparativa del primer entrenamiento
+  MAG de 4 folds (error mediano en minutos y fracción con error ≤60 s).
+  Lee `results/metrics/mag_cv_full/cv_summary.json` y guarda PNG en
+  `results/metrics/mag_cv_full/figures/`.
+
+```bash
+python scripts/6_figures/6a_plot_mag_cv_summary.py
+```
+
+No ejecuta BigQuery ni reentrena. Ver `scripts/6_figures/README.md`.
