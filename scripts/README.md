@@ -183,3 +183,21 @@ rotativos por evento y época cubren 600 centros en 15 épocas. Se reutiliza
 la caché MAG y se guardan checkpoints nuevos en
 `results/metrics/mag_cv_dense_temporal_v1/`. Ver
 `docs/mag_sixth_training.md`.
+
+### Séptimo entrenamiento: fusión MAG+SWEA con regiones físicas
+
+`scripts/5_training/5b_train_mag_swea_regions.py` entrena un modelo dual
+MAG y SWEA (cadencias nativas), con reconstrucción auxiliar, clasificación
+de magnetosheath/magnetosfera inducida y detección de transiciones MPB.
+Supervisión débil conservadora basada en tiempos MPB y BS y control de
+intervalos cercanos a fronteras.
+
+```bash
+bash scripts/5_training/run_mag_swea_regions_v7.sh
+```
+
+La caché MAG previa se reutiliza. La caché SWEA nueva se guarda en
+`data/cache/swea_events/`. Los 4 folds usan monitoreo interno y evaluación
+externa condicionada a cruces etiquetados; el F1 de candidatos con etiquetas
+débiles no es F1 orbital. Más detalles en
+`docs/mag_swea_seventh_training.md`.
