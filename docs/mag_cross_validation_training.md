@@ -1,3 +1,59 @@
+## Segundo entrenamiento MAG: 600 etiquetas gaussianas por evento + detección ponderada
+
+**Configuración nueva (sin modificar los resultados del experimento anterior):**
+
+- Entradas: cada ventana sigue teniendo **600 segundos** de MAG a cadencia nativa,
+  con cuatro canales; el modelo devuelve **un puntaje por ventana**.
+- Para cada evento TRAIN se escogen **hasta 600 centros de ventanas
+  deslizantes válidas**, y se calcula **un valor de la etiqueta gaussiana
+  para cada centro**. La etiqueta ya existía por ventana; antes reteníamos
+  solamente 24 ventanas por evento.
+- Importante: `sigma=60` significa **desviación estándar de 60 segundos**,
+  no un vector de 60 elementos. Mantenemos el mismo ancho físico de la
+  etiqueta para poder atribuir las diferencias al muestreo y al peso de
+  la detección.
+- Para contener el costo computacional, por época se eligen **24 de las
+  600 ventanas por evento**, recorriendo una permutación reproducible y
+  distinta en cada evento. En **25 épocas** se recorren las 600
+  etiquetas cuando existen todas. Por eso `--min-epochs=25` impide que
+  early stopping termine antes.
+- Validación externa: hasta **600 centros** por evento (antes 121). Los
+  intervalos de observación y etiquetas de MPB siguen siendo los mismos.
+- Función objetivo: `L = L_rec + 10 * L_det` (antes `L_rec + 1 * L_det`).
+  `L_det` mantiene su ponderación por cercanía a etiquetas y el encoder
+  sigue recibiendo gradientes de ambas ramas. Esto **no convierte** el
+  score en una probabilidad calibrada, ni pondera directamente cada
+  muestra de reconstrucción.
+- Se mantienen cuatro folds externos, validación interna por meses, 100
+  épocas máximas, patience 10 y normalizadores completos preexistentes.
+
+Todos los resultados del **primer entrenamiento** siguen intactos en
+`results/metrics/mag_cv_full/`. El nuevo experimento guarda por defecto
+en **`results/metrics/mag_cv_600windows_det10/`**, evitando reanudar
+checkpoints incompatibles.
+
+```bash
+cd ~/Codigos/MAVEN-MPB-DeepLearning
+source .venv/bin/activate
+git pull origin main
+tmux new -s mag_cv_600
+bash scripts/5_training/run_mag_cv_full.sh
+```
+
+El launcher verifica sintaxis y pruebas offline, hace estimaciones BigQuery
+para todos los eventos y solo ejecuta consultas con el límite configurado
+(`MAX_TOTAL_GIB=150` por defecto). Como la primera ejecución no guardó
+las mediciones científicas, **será necesario consultar nuevamente** los
+bloques MAG. Este segundo experimento puede requerir más tiempo y RAM,
+especialmente al evaluar 600 ventanas por evento.
+
+Las métricas del nuevo experimento no son comparables sin más con las del
+primero porque también se aumentó la densidad de los centros externos de
+evaluación (121 a 600). Para comparación estricta hay que evaluar ambos
+checkpoints sobre los mismos centros.
+
+---
+
 ## Entrenamiento COMPLETO MAG con los cuatro folds (todos los eventos)
 
 Cuando se requiere el entrenamiento completo, **NO** usar
