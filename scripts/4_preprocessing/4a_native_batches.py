@@ -195,6 +195,66 @@ def masked_reconstruction_mse(
     return (torch.square(reconstructed - batch.x) * expanded).sum() / count
 
 
+
+def masked_mag_modulus_mse(
+    reconstructed: torch.Tensor,
+    batch: NativeBatch,
+    normalizer: FoldChannelNormalizer,
+) -> torch.Tensor:
+    """Penalize both MAG magnitude reconstruction and physical consistency.
+
+    MAG has independently standardized [Bx, By, Bz, |B|] input/output channels.
+    Recover physical nT using the FROZEN, TRAIN-only per-fold normalizer before
+    computing the norm of reconstructed vector components.
+
+    The two equally weighted terms compare:
+      1. decoded |B| channel vs observed |B| (nT);
+      2. norm of decoded Bx, By, Bz vs observed |B| (nT).
+    The mean is over observed samples ONLY (masked padding excluded).
+    Divide by training-fold magnitude variance to make it dimensionless and
+    comparable in scale to normalized reconstruction MSE.
+
+    This adds a differentiable physical constraint without changing the
+    architecture, and does not assume that a decoder channel itself equals
+    the Euclidean norm unless learned. No calibration/MPB probability implied.
+    """
+    if (normalizer.instrument != "MAG" or not normalizer.is_frozen
+            or normalizer.mean is None or normalizer.scale is None):
+        raise ValueError("Require a frozen MAG normalizer.")
+    if (reconstructed.shape != batch.x.shape
+            or reconstructed.ndim != 3 or reconstructed.shape[1] != 4
+            or batch.time_mask.shape != (batch.x.shape[0], batch.x.shape[2])):
+        raise ValueError("Expected MAG (batch,4,time) and matching time mask.")
+    if not bool(batch.time_mask.any()):
+        raise ValueError("Cannot calculate magnitude loss without valid epochs.")
+
+    mu = torch.as_tensor(
+        normalizer.mean, dtype=reconstructed.dtype, device=reconstructed.device
+    ).reshape(1, 4, 1)
+    scale = torch.as_tensor(
+        normalizer.scale, dtype=reconstructed.dtype, device=reconstructed.device
+    ).reshape(1, 4, 1)
+    if not bool(torch.isfinite(scale).all()) or not bool((scale > 0).all()):
+        raise ValueError("Invalid MAG normalization scale.")
+
+    reconstructed_nt = reconstructed * scale + mu
+    observed_nt = batch.x * scale + mu
+    observed_magnitude = observed_nt[:, 3, :]
+    reconstructed_magnitude_channel = reconstructed_nt[:, 3, :]
+    reconstructed_magnitude_vector = torch.linalg.vector_norm(
+        reconstructed_nt[:, :3, :], dim=1
+    )
+    valid = batch.time_mask.to(reconstructed.dtype)
+    magnitude_variance = scale[0, 3, 0].square()
+    # Both differences are in nT², divided by (fold TRAIN std |B|)².
+    channel_error = (reconstructed_magnitude_channel - observed_magnitude).square()
+    vector_error = (reconstructed_magnitude_vector - observed_magnitude).square()
+    return ((channel_error + vector_error) * valid).sum() / (
+        2.0 * valid.sum() * magnitude_variance
+    )
+
+
+
 def weighted_proximity_mse(
     predicted: torch.Tensor,
     batch: NativeBatch,
