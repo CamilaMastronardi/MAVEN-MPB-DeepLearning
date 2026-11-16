@@ -1,13 +1,15 @@
 # 6. Figuras científicas
 
-Esta carpeta contiene scripts que generan figuras reproducibles a partir de
-**resultados ya calculados**, no de consultas a BigQuery. Mantener separado:
+Esta carpeta contiene scripts de figuras reproducibles. La figura 6a usa
+exclusivamente las métricas guardadas; la figura 6b también debe consultar
+dos intervalos de mediciones reales en BigQuery, ya que las señales MAG
+no se guardaron en el entrenamiento. Mantener separado:
 
 - `scripts/5_training/`: entrenamiento, validación y exportación de métricas.
 - `scripts/6_figures/`: lectura de resultados y generación de figuras.
 - `results/metrics/<experimento>/figures/`: imágenes finales.
 
-## 6a — Resultados del primer entrenamiento MAG
+## 6a — Resumen por fold del entrenamiento MAG (segundo por defecto)
 
 Desde la **raíz del repositorio**, con `.venv` activado:
 
@@ -15,11 +17,15 @@ Desde la **raíz del repositorio**, con `.venv` activado:
 python scripts/6_figures/6a_plot_mag_cv_summary.py
 ```
 
-Entrada:
-`results/metrics/mag_cv_full/cv_summary.json`
+Entrada por defecto:
+`results/metrics/mag_cv_600windows_det10/cv_summary.json`
 
-Salida:
-`results/metrics/mag_cv_full/figures/mag_cv_first_training.png`
+Salida por defecto:
+`results/metrics/mag_cv_600windows_det10/figures/mag_cv_second_training.png`
+
+El mismo script también reproduce el primer entrenamiento mediante
+`--summary results/metrics/mag_cv_full/cv_summary.json`, sin sobrescribir
+ninguna figura previa.
 
 La figura contiene dos paneles: error mediano de localización (minutos)
 y porcentaje de eventos localizados con error absoluto ≤60 segundos por fold.
@@ -35,7 +41,7 @@ Podés personalizar las rutas:
 ```bash
 python scripts/6_figures/6a_plot_mag_cv_summary.py \
   --summary results/metrics/mag_cv_full/cv_summary.json \
-  --output results/metrics/mag_cv_full/figures/otro_nombre.png
+  --output results/metrics/mag_cv_full/figures/mag_cv_first_training.png
 ```
 
 
@@ -53,7 +59,8 @@ el fold; con `--fold all`, los casos podrían pertenecer a modelos distintos.
 
 La red MAG se entrenó para ventanas de **600 s**, no de 70 minutos.
 El script recupera 70 minutos de datos reales alrededor de cada etiqueta,
-reproduce las **121 ventanas de 600 s** de la evaluación externa por evento,
+reproduce las **600 ventanas de 600 s** de la evaluación externa por evento
+en el segundo entrenamiento (121 en el primero),
 calcula la reconstrucción en nT en cada una y promedia las porciones
 solapadas en los mismos instantes nativos. Los **centros** evaluables
 están aproximadamente entre −30 y +30 min porque cada ventana
@@ -82,12 +89,22 @@ Desde la raíz del repositorio, con `.venv` activo:
 # Estimar cuánto procesarían dos consultas de 70 min (sin recuperar datos):
 python scripts/6_figures/6b_plot_mag_reconstruction_cases.py
 
-# Hacer las dos consultas reales, inferir las 121 ventanas por evento y graficar:
+# Hacer las dos consultas reales, inferir las 600 ventanas por evento y graficar:
 python scripts/6_figures/6b_plot_mag_reconstruction_cases.py --execute
 ```
 
 Salida:
-`results/metrics/mag_cv_full/figures/mag_cv_reconstruction_good_vs_bad.png`
+`results/metrics/mag_cv_600windows_det10/figures/mag_cv_reconstruction_good_vs_bad.png`
+
+El script lee automáticamente del `cv_summary.json` la cantidad de
+centros de evaluación y `sigma`, para que las predicciones coincidan
+con los errores usados al seleccionar los casos. El uso del primer
+entrenamiento sigue disponible con:
+```bash
+python scripts/6_figures/6b_plot_mag_reconstruction_cases.py \
+  --results-dir results/metrics/mag_cv_full --execute
+```
+En ese caso se generan las figuras en `mag_cv_full/figures/`.
 
 Se añade un JSON pequeño con fechas/folds y errores para trazabilidad,
 pero **no se guardan archivos con mediciones MAG sin procesar**.
