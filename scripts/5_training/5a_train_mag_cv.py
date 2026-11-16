@@ -679,7 +679,7 @@ def train_fold(fold, selected, blocks, normalizer, run_sig, args, device,
         best_val = float(state["best_val"])
         best_epoch = int(state["best_epoch"])
         stale_epochs = int(state["stale_epochs"])
-        if not best_path.exists():
+        if start_epoch >= args.min_epochs and not best_path.exists():
             raise RuntimeError("Best checkpoint is missing; refuse unsafe resume.")
         print(f"FOLD {fold}: resumed after epoch {start_epoch}, "
               f"best epoch {best_epoch}.", flush=True)
@@ -698,19 +698,24 @@ def train_fold(fold, selected, blocks, normalizer, run_sig, args, device,
             model, monitor_windows, normalizer, args, device
         )
         candidate = val_stats["val_det"]
-        improved = (best_epoch == 0 or
-                    candidate < best_val - args.early_stop_min_delta)
-        if improved:
-            best_val = candidate
-            best_epoch = epoch
-            stale_epochs = 0
-            save_checkpoint(best_path, {
-                "schema": 2, "fold": fold, "signature": run_sig,
-                "epoch": epoch, "best_val_det": best_val,
-                "model": model.state_dict()
-            })
-        else:
-            stale_epochs += 1
+        # Only models trained on a full 600-target rotation are eligible.
+        # Otherwise the "best" checkpoint could be from epoch 4, when
+        # only 96/600 Gaussian target centers had ever been seen.
+        improved = False
+        if epoch >= args.min_epochs:
+            improved = (best_epoch == 0 or
+                        candidate < best_val - args.early_stop_min_delta)
+            if improved:
+                best_val = candidate
+                best_epoch = epoch
+                stale_epochs = 0
+                save_checkpoint(best_path, {
+                    "schema": 2, "fold": fold, "signature": run_sig,
+                    "epoch": epoch, "best_val_det": best_val,
+                    "model": model.state_dict()
+                })
+            else:
+                stale_epochs += 1
 
         history.append({"epoch": epoch, **stats, **val_stats,
                         "best_epoch_so_far": best_epoch})
