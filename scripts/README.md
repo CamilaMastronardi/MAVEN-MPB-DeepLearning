@@ -93,3 +93,16 @@ python scripts/6_figures/6a_plot_mag_cv_summary.py
 ```
 
 No ejecuta BigQuery ni reentrena. Ver `scripts/6_figures/README.md`.
+
+- `6b_plot_mag_reconstruction_cases.py`: figura diagnóstica de dos ejemplos
+  reales de MAG (uno bien localizado y otro mal localizado) con cuatro
+  canales observados/reconstruidos sobre 70 minutos y curva de puntaje
+  MPB en un quinto panel. Usa el modelo guardado de cada fold y dos
+  consultas BigQuery de 70 min, con *dry-run* por defecto.
+
+```bash
+python scripts/6_figures/6b_plot_mag_reconstruction_cases.py           # estimar consultas
+python scripts/6_figures/6b_plot_mag_reconstruction_cases.py --execute # dibujar
+```
+
+Salida: `results/metrics/mag_cv_full/figures/mag_cv_reconstruction_good_vs_bad.png`.
