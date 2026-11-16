@@ -165,3 +165,21 @@ bash scripts/5_training/run_mag_cv_residual.sh
 
 Salidas exclusivas: `results/metrics/mag_cv_residual_transition_v1/`.
 Detalles en `docs/mag_fifth_training.md`.
+
+### Sexto entrenamiento MAG: salida temporal y early stopping 15/10
+
+`src/detection/mag_dense_temporal_autoencoder.py` conserva el encoder residual
+del quinto entrenamiento, pero devuelve `s(t)` por muestra MAG válida. La
+pérdida gaussiana se calcula en tiempos nativos con padding enmascarado.
+Para la evaluación externa se combinan los puntajes de 600 ventanas en sus
+timestamps nativos, buscando el máximo en ±30 min.
+
+```bash
+bash scripts/5_training/run_mag_cv_dense_temporal.sh
+```
+
+Se utiliza mínimo **15 épocas** con paciencia **10**; los **40 centros**
+rotativos por evento y época cubren 600 centros en 15 épocas. Se reutiliza
+la caché MAG y se guardan checkpoints nuevos en
+`results/metrics/mag_cv_dense_temporal_v1/`. Ver
+`docs/mag_sixth_training.md`.
