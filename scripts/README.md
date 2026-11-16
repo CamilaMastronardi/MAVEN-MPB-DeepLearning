@@ -145,3 +145,23 @@ usando `run_mag_cv_full.sh` con su arquitectura original.
 # CUARTO experimento completo, cuando haya terminado el tercero:
 bash scripts/5_training/run_mag_cv_transition.sh
 ```
+
+### Quinto experimento MAG — encoder residual profundo y caché persistente
+
+`src/detection/mag_residual_transition_autoencoder.py` conserva el detector
+de transiciones antes/después del cuarto entrenamiento, pero utiliza un encoder
+residual multiescala de 32 canales ocultos, 8 canales latentes y 7 dilataciones
+(515 muestras de campo receptivo teórico).
+
+`scripts/5_training/run_mag_cv_residual.sh` ejecuta **cuatro folds completos**,
+con pérdida y early stopping iguales a los del cuarto, y almacena datos MAG
+medidos originales en `data/cache/mag_events/` con verificaciones de SHA-256
+para posteriores reutilizaciones sin BigQuery.
+
+```bash
+# No lanzar simultáneamente con el cuarto si compiten por CPU/RAM:
+bash scripts/5_training/run_mag_cv_residual.sh
+```
+
+Salidas exclusivas: `results/metrics/mag_cv_residual_transition_v1/`.
+Detalles en `docs/mag_fifth_training.md`.
