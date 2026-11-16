@@ -40,7 +40,7 @@ from src.detection.mag_autoencoder import MagSupervisedAutoencoder
 
 DEFAULT_MANIFEST = Path("data/splits/cv4_monthly_manifest.csv")
 DEFAULT_NORMALIZERS = Path("results/metrics/fold_normalization")
-DEFAULT_OUTPUT = Path("results/metrics/mag_cv")
+DEFAULT_OUTPUT = Path("results/metrics/mag_cv_600windows_det10_mag1_pat20_ep1000")
 WINDOW_S = 600.0
 CENTER_RANGE_S = 1800.0
 SUPPORT_MINUTES = 35.0
@@ -53,10 +53,10 @@ def parser():
     p.add_argument("--normalizers-dir", type=Path, default=DEFAULT_NORMALIZERS)
     p.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)
     p.add_argument("--folds", choices=("all", "1", "2", "3", "4"), default="all")
-    p.add_argument("--epochs", type=int, default=100)
+    p.add_argument("--epochs", type=int, default=1000)
     p.add_argument("--min-epochs", type=int, default=25,
                    help="Complete a full rotation of 600 targets at 24 per epoch.")
-    p.add_argument("--early-stop-patience", type=int, default=10)
+    p.add_argument("--early-stop-patience", type=int, default=20)
     p.add_argument("--early-stop-min-delta", type=float, default=1e-4)
     p.add_argument("--monitor-centers-per-event", type=int, default=21,
                    help="Number of fixed validation centers per event to check per epoch.")
@@ -74,6 +74,8 @@ def parser():
     p.add_argument("--near-radius-seconds", type=float, default=120.)
     p.add_argument("--near-label-weight", type=float, default=10.)
     p.add_argument("--lambda-detection", type=float, default=10.)
+    p.add_argument("--lambda-magnitude", type=float, default=1.,
+                   help="Weight on physically scaled |B| reconstruction/consistency loss.")
     p.add_argument("--learning-rate", type=float, default=1e-3)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--torch-threads", type=int, default=2)
@@ -91,6 +93,7 @@ def parser():
         a.epochs, a.min_epochs, a.early_stop_patience, a.monitor_centers_per_event,
         a.batch_size, a.train_windows_per_event, a.train_windows_per_epoch,
         a.val_centers_per_event, a.sigma_seconds, a.near_radius_seconds,
+        a.lambda_magnitude,
         a.near_label_weight, a.learning_rate, a.max_query_gib,
         a.max_total_gib, a.max_returned_rows, a.torch_threads
     ]
@@ -198,6 +201,7 @@ def signature(args, fold, train, val, normalizer_sha):
         "near_radius_seconds": args.near_radius_seconds,
         "near_label_weight": args.near_label_weight,
         "lambda_detection": args.lambda_detection,
+        "lambda_magnitude": args.lambda_magnitude,
         "learning_rate": args.learning_rate, "seed": args.seed,
         "early_stop_patience": args.early_stop_patience,
         "early_stop_min_delta": args.early_stop_min_delta,
@@ -425,7 +429,7 @@ def training_epoch(model, optimizer, event_pools, blocks, normalizer,
     rng = random.Random(args.seed + fold * 10000 + epoch)
     rng.shuffle(tasks)
     model.train()
-    total_rec = total_det = total_loss = steps = 0.
+    total_rec = total_det = total_mag = total_loss = steps = 0.
     for pos in range(0, len(tasks), args.batch_size):
         group = [
             inflate_native_window(blocks[event_time], entry)
@@ -438,7 +442,9 @@ def training_epoch(model, optimizer, event_pools, blocks, normalizer,
         det = batching.weighted_proximity_mse(
             pred, batch, near_label_weight=args.near_label_weight
         )
-        loss = rec + args.lambda_detection * det
+        mag = batching.masked_mag_modulus_mse(recon, batch, normalizer)
+        loss = (rec + args.lambda_detection * det
+                + args.lambda_magnitude * mag)
         if not bool(torch.isfinite(loss)):
             raise FloatingPointError("Nonfinite loss; aborting fold.")
         loss.backward()
@@ -446,6 +452,7 @@ def training_epoch(model, optimizer, event_pools, blocks, normalizer,
         optimizer.step()
         total_rec += float(rec.detach())
         total_det += float(det.detach())
+        total_mag += float(mag.detach())
         total_loss += float(loss.detach())
         steps += 1
     if not steps:
@@ -453,6 +460,7 @@ def training_epoch(model, optimizer, event_pools, blocks, normalizer,
     return {"train_loss": total_loss/steps,
             "train_rec": total_rec/steps,
             "train_det": total_det/steps,
+            "train_mag": total_mag/steps,
             "train_batches": int(steps),
             "train_windows_seen_this_epoch": len(tasks)}
 
@@ -544,6 +552,7 @@ def evaluate_monitor(model, windows, normalizer, args, device):
     model.eval()
     det_numerator = det_denominator = 0.0
     rec_numerator = rec_denominator = 0.0
+    mag_numerator = mag_denominator = 0.0
     for i in range(0, len(windows), args.batch_size):
         batch = make_batch(windows[i:i+args.batch_size], normalizer, device)
         _, reconstruction, scores = model(
@@ -556,11 +565,17 @@ def evaluate_monitor(model, windows, normalizer, args, device):
         mask = batch.time_mask[:, None, :].to(batch.x.dtype)
         rec_numerator += float(((reconstruction - batch.x).square() * mask).sum())
         rec_denominator += float(mask.sum()) * batch.x.shape[1]
-    if det_denominator == 0 or rec_denominator == 0:
+        n_valid = float(batch.time_mask.sum())
+        mag_numerator += float(
+            batching.masked_mag_modulus_mse(reconstruction, batch, normalizer)
+        ) * n_valid
+        mag_denominator += n_valid
+    if det_denominator == 0 or rec_denominator == 0 or mag_denominator == 0:
         raise ValueError("No evaluable held-out validation windows.")
     return {
         "val_det": det_numerator/det_denominator,
         "val_rec": rec_numerator/rec_denominator,
+        "val_mag": mag_numerator/mag_denominator,
     }
 
 
@@ -729,8 +744,10 @@ def train_fold(fold, selected, blocks, normalizer, run_sig, args, device,
         print(f"FOLD {fold} EPOCH {epoch}/{args.epochs}: "
               f"train_total={stats['train_loss']:.5f} "
               f"train_det={stats['train_det']:.5f} "
+              f"train_mag={stats['train_mag']:.5f} "
               f"val_det={val_stats['val_det']:.5f} "
               f"val_rec={val_stats['val_rec']:.5f} "
+              f"val_mag={val_stats['val_mag']:.5f} "
               f"best_epoch={best_epoch} stale={stale_epochs}",
               flush=True)
         if stale_epochs >= args.early_stop_patience and epoch >= args.min_epochs:
@@ -763,6 +780,7 @@ def train_fold(fold, selected, blocks, normalizer, run_sig, args, device,
         "train_windows": train_pool_count,
         "train_windows_per_epoch": args.train_windows_per_epoch,
         "lambda_detection": args.lambda_detection,
+        "lambda_magnitude": args.lambda_magnitude,
         "sigma_seconds": args.sigma_seconds,
         "val_events_selected": len(val), "train_history": history,
         "pilot_subset": bool(args.max_train_events or args.max_val_events),
@@ -871,6 +889,7 @@ def main():
             "val_centers_per_event": args.val_centers_per_event,
             "sigma_seconds": args.sigma_seconds,
             "lambda_detection": args.lambda_detection,
+            "lambda_magnitude": args.lambda_magnitude,
             "near_label_weight": args.near_label_weight,
             "min_epochs": args.min_epochs,
             "max_epochs": args.epochs,
