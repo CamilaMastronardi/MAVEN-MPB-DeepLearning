@@ -293,3 +293,26 @@ cambia el objetivo a `L = L_rec + 10 L_det`. El ancho de la gaussiana
 permanece en `sigma=60 s`; 60 era el ancho en segundos, no la cantidad
 de etiquetas. Resultados nuevos: `results/metrics/mag_cv_600windows_det10/`.
 El primer experimento, `mag_cv_full/`, se conserva intacto.
+
+## Tercer entrenamiento MAG: pérdida física del módulo
+
+La versión actual de `scripts/5_training/run_mag_cv_full.sh` agrega una
+pérdida de reconstrucción física para `|B|`: compara el módulo medido con
+el cuarto canal reconstruido y con la norma de las componentes reconstruidas,
+desnormalizadas a nT con el normalizador TRAIN de cada fold.
+
+La pérdida completa es `L = L_rec + 10 L_det + L_mag`. Se mantienen los
+cuatro folds, las 600 etiquetas por evento y la rotación de 24 ventanas por
+época. El máximo es **1000 épocas por fold**, con **paciencia 20** y un
+mínimo de 25 épocas. La selección del mejor checkpoint continúa basada en
+la pérdida de detección del holdout interno; `train_mag` y `val_mag`
+se registran para diagnóstico.
+
+Nuevo experimento independiente:
+`results/metrics/mag_cv_600windows_det10_mag1_pat20_ep1000/`.
+
+```bash
+bash scripts/5_training/run_mag_cv_full.sh
+```
+
+Detalles en `docs/mag_cross_validation_training.md`.
