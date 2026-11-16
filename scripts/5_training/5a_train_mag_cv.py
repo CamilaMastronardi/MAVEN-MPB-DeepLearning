@@ -860,6 +860,17 @@ def main():
         "requested_folds": list(requested),
         "completed_folds": sorted(results),
         "pilot_subset": bool(args.max_train_events or args.max_val_events),
+        "training_configuration": {
+            "train_targets_per_event": args.train_windows_per_event,
+            "train_samples_per_event_per_epoch": args.train_windows_per_epoch,
+            "val_centers_per_event": args.val_centers_per_event,
+            "sigma_seconds": args.sigma_seconds,
+            "lambda_detection": args.lambda_detection,
+            "near_label_weight": args.near_label_weight,
+            "min_epochs": args.min_epochs,
+            "max_epochs": args.epochs,
+            "early_stop_patience": args.early_stop_patience,
+        },
         "fold_results": [{
             "fold": f,
             "median_abs_peak_error_s": results[f].get("median_abs_peak_error_s"),
