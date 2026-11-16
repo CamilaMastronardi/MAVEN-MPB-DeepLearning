@@ -47,7 +47,9 @@ los 4 archivos `fold_XX_event_metrics.csv` y los normalizadores del fold.
 Selecciona un cruce correctamente localizado (error ≤60 s) y otro mal
 localizado (error ≥600 s). Escoge casos cercanos a la mediana de cada
 subgrupo para evitar seleccionar solo los extremos más espectaculares.
-Cada ejemplo usa **su propio modelo del fold reservado para validación**.
+Por defecto, ambos casos son del **fold 1**, para comparar la reconstrucción
+del mismo modelo y con el mismo normalizador. Opcionalmente se puede cambiar
+el fold; con `--fold all`, los casos podrían pertenecer a modelos distintos.
 
 La red MAG se entrenó para ventanas de **600 s**, no de 70 minutos.
 El script recupera 70 minutos de datos reales alrededor de cada etiqueta,
@@ -88,8 +90,9 @@ Salida:
 Se añade un JSON pequeño con fechas/folds y errores para trazabilidad,
 pero **no se guardan archivos con mediciones MAG sin procesar**.
 
-Opcional: `--fold 1` elige ambos ejemplos del fold 1 (si existen los dos
-tipos); `--max-total-gib` y `--max-query-gib` ajustan los límites de
-las consultas. Si una puntuación recalculada difiere de la registrada
+Por defecto se usa `--fold 1`. Opcional: `--fold 2` o `--fold 3`
+para otro modelo específico, o `--fold all` para elegir entre todos
+los folds. `--max-total-gib` y `--max-query-gib` ajustan los límites
+de las consultas. Si una puntuación recalculada difiere de la registrada
 en el CSV por más de 2 s de desplazamiento, el programa se detiene
 en lugar de presentar un caso potencialmente mal etiquetado.
