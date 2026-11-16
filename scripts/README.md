@@ -118,3 +118,16 @@ por MPB. Guarda la ejecución en `results/metrics/mag_cv_600windows_det10/`
 para no alterar `mag_cv_full/` del primer entrenamiento.
 
 Ver `docs/mag_cross_validation_training.md` para detalles y límites.
+
+### Tercer entrenamiento MAG: regularización física de |B|
+
+El launcher `run_mag_cv_full.sh` usa hasta **1000 épocas**, paciencia de
+**20 épocas** y la pérdida
+`L = L_rec + 10 L_det + L_mag`. `L_mag` penaliza tanto el error del
+canal reconstruido de módulo como el error de la norma de las tres
+componentes reconstruidas respecto del módulo observado. El cálculo
+se realiza en nT y usa la escala de |B| del normalizador de TRAIN.
+
+Resultados en `results/metrics/mag_cv_600windows_det10_mag1_pat20_ep1000/`,
+sin modificar los experimentos 1 y 2. Ver
+`docs/mag_cross_validation_training.md`.
