@@ -32,6 +32,20 @@ ajustar el modelo con el fold de validación.
 
 ## Primera ejecución recomendada: piloto de 4 folds con datos reales
 
+Para hacerlo en un único paso, el repositorio incluye
+`scripts/5_training/run_mag_cv_pilot.sh`. Comprueba sintaxis y pruebas offline
+**antes de cualquier consulta facturable**; luego inicia los cuatro folds
+con el mismo límite de 35 GiB, escribe un log y reanuda checkpoints previos.
+Dentro de tmux basta con:
+
+```bash
+bash scripts/5_training/run_mag_cv_pilot.sh
+```
+
+Si alguna prueba falla, el script se detiene sin ejecutar BigQuery. Para
+inspeccionar manualmente el costo antes de ejecutar, usar el comando de
+estimación que figura a continuación.
+
 Ejecutar desde la raíz del repositorio con `.venv` activado:
 
 ```bash
