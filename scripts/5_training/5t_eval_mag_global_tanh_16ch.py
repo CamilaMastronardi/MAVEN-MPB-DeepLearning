@@ -161,27 +161,46 @@ def write_csv(filename, rows):
         writer.writerows(rows)
 
 
-def plot_one(output, event, curves):
+def plot_one(output, event, curves, old, *, zoom_s=None):
+    """Plot fitted global classification and event-global target (reference only).
+
+    The ground-truth target is computed ONLY for retrospective plotting;
+    it is never passed to inference, curve stitching or tanh fitting.
+    """
     fig, (ax, bx) = plt.subplots(2, 1, figsize=(13, 7), sharex=True)
-    for variant, (signal, fit) in curves.items():
-        x = signal["time_s"]
-        ax.plot(x, signal["class_curve"], alpha=0.67,
-                label=f"{variant}: clasificación combinada")
-        if fit["ok"]:
-            ax.plot(x, fit["fit_curve"], ls="--", lw=1.3,
-                    label=f"{variant}: tanh global")
-            ax.axvline(fit["pred_offset_s"], ls=":", lw=1.1,
-                       label=f"{variant}: MPB estimada")
     first = next(iter(curves.values()))[0]
-    bx.plot(first["time_s"], first["B_nt"][:, 3], color="gray", alpha=0.8,
+    x = first["time_s"]
+    block = (x + event["time"], first["B_nt"])
+    tau, _ = old.estimate_adaptive_tau(block, event["time"])
+    direction = 1. if event["bs_time"] < event["time"] else -1.
+
+    ax.plot(x, direction * np.tanh(x / 60.), color="black",
+            lw=1.5, ls="--", alpha=.8,
+            label="Tanh objetivo global: Fixed (tau=60 s)")
+    ax.plot(x, direction * np.tanh(x / tau), color="purple",
+            lw=1.5, ls="-.", alpha=.8,
+            label=f"Tanh objetivo global: Adaptive/Consistent (tau={tau:.1f} s)")
+
+    for variant, (signal, fit) in curves.items():
+        ax.plot(signal["time_s"], signal["class_curve"], alpha=.67,
+                label=f"{variant}: clasificación global reconstruida")
+        if fit["ok"]:
+            ax.plot(signal["time_s"], fit["fit_curve"], ls=":", lw=1.2,
+                    label=f"{variant}: tanh ajustada a la reconstrucción")
+            ax.axvline(fit["pred_offset_s"], alpha=.55, lw=1.,
+                       label=f"{variant}: MPB estimada")
+    bx.plot(x, first["B_nt"][:, 3], color="gray", alpha=.8,
             label="|B| observado")
     for a in (ax, bx):
-        a.axvline(0, color="black", ls="--", label="MPB catalogada (solo referencia)")
-        a.legend(loc="best", fontsize=8)
-    ax.set_ylabel("Clasificación reconstruida [-1,1]")
+        a.axvline(0, color="black", ls="--", alpha=.7,
+                  label="MPB catalogada (referencia)")
+        if zoom_s is not None:
+            a.set_xlim(-zoom_s, zoom_s)
+        a.legend(loc="best", fontsize=7, ncol=2)
+    ax.set_ylabel("Clasificación [-1,1]")
     bx.set_ylabel("|B| medido (nT)")
     bx.set_xlabel("Tiempo respecto a MPB catalogada (s)")
-    ax.set_title(f"Predicción global a partir de ventanas de 600 s | {event['mpb_timestamp_utc']}")
+    ax.set_title(f"Objetivo y reconstrucción global de 70 min | {event['mpb_timestamp_utc']}")
     fig.tight_layout()
     fig.savefig(output, dpi=160)
     plt.close(fig)
@@ -266,8 +285,11 @@ def main():
             summaries.append(summary)
             print(summary, flush=True)
         for j, group in figures.items():
-            plot_one(root/f"fold_{fold:02d}_global_{j+1:02d}.png", group["event"],
-                     {k:v for k,v in group.items() if k!="event"})
+            plots = {k: v for k, v in group.items() if k != "event"}
+            plot_one(root/f"fold_{fold:02d}_global_{j+1:02d}.png",
+                     group["event"], plots, old)
+            plot_one(root/f"fold_{fold:02d}_global_zoom_{j+1:02d}.png",
+                     group["event"], plots, old, zoom_s=300.)
         # No model-selection decisions are made from these held-out results.
         del all_rows
     write_csv(args.output_dir/"summary.csv", summaries)
