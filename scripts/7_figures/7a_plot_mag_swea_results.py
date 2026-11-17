@@ -11,6 +11,7 @@ import argparse
 import csv
 import json
 from pathlib import Path
+from datetime import datetime, timezone
 
 import matplotlib
 matplotlib.use("Agg")
@@ -28,7 +29,17 @@ def load_events(base):
             for row in csv.DictReader(f):
                 if row.get("absolute_error_s", "") == "":
                     continue
-                key = (fold, row["mpb_timestamp_utc"])
+                timestamp = datetime.fromisoformat(
+                    row["mpb_timestamp_utc"].replace("Z", "+00:00")
+                )
+                if timestamp.tzinfo is None:
+                    raise ValueError("MPB comparison needs UTC-aware timestamps.")
+                key = (
+                    fold,
+                    timestamp.astimezone(timezone.utc).isoformat(
+                        timespec="microseconds"
+                    )
+                )
                 if key in result:
                     raise ValueError(f"Duplicate MPB timestamp {key}.")
                 result[key] = float(row["absolute_error_s"])
