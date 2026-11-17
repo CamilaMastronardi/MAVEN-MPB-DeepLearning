@@ -53,6 +53,7 @@ def parse_args():
     p.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)
     p.add_argument("--mag-cache-dir", type=Path, default=v7.MAG_CACHE)
     p.add_argument("--swea-cache-dir", type=Path, default=v7.SWEA_CACHE)
+    p.add_argument("--refresh-swea-cache", action="store_true")
     p.add_argument("--folds", default="all", choices=("all","1","2","3","4"))
     p.add_argument("--pilot-events-per-fold", type=int, default=0)
     p.add_argument("--max-epochs", type=int, default=35)
