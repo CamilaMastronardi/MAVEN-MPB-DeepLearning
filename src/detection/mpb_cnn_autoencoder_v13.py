@@ -113,7 +113,7 @@ def mag_collate(examples,mag_normalizer,device="cpu"):
             clip.mag,dtype=torch.float32,device=device
         )
         n=len(values)
-        if values.ndim!=2 or values.shape[1]!=4 or not 540<=n<=LENGTH-40:
+        if values.ndim!=2 or values.shape[1]!=4 or not 540<=n<=LENGTH:
             raise ValueError(
                 f"Invalid V13 measured MAG clip of length {n}."
             )
