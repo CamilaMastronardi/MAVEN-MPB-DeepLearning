@@ -590,11 +590,23 @@ def main():
                 f"usable={len(embeddings)}.",
                 flush=True
             )
+    # Evaluate MPB-window identification and conditional offset on a
+    # held-out MONTH-block fold, not only on the inner training monitor.
+    # These metrics still do NOT test an autonomous full 70-min scan.
+    outer_pool,outer_skips=v9.gather_training_pools(
+        outer,blocks,mpb_s,bs_s
+    )
+    outer_window_metrics=(
+        monitor_epoch(model,outer_pool,mag_norm,a,device)
+        if outer_pool else None
+    )
     clustering=choose_clustering(fit,embeddings,a)
+    fit_times={r["time"] for r in fit}
+    monitor_times={r["time"] for r in monitor}
     split={
         r["time"]:(
-            "fit" if r in fit else
-            "inner_monitor" if r in monitor else
+            "fit" if r["time"] in fit_times else
+            "inner_monitor" if r["time"] in monitor_times else
             "outer_holdout"
         ) for r in selected
     }
@@ -618,6 +630,8 @@ def main():
         "n_excluded_support_overlap":removed,
         "best_epoch":best_epoch,
         "monitor_at_best":history[best_epoch-1]["monitor"],
+        "outer_window_diagnostics":outer_window_metrics,
+        "outer_skips":outer_skips,
         "train_skips":fit_skips,
         "monitor_skips":monitor_skips,
         "normalizer":"MAG TRAIN-only unique epochs",
