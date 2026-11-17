@@ -52,6 +52,9 @@ def parse_args():
     p.add_argument("--output-dir",type=Path,default=OUT)
     p.add_argument("--mag-cache-dir",type=Path,default=v7.MAG_CACHE)
     p.add_argument("--swea-cache-dir",type=Path,default=v7.SWEA_CACHE)
+    # v7.load_event_blocks uses this flag. V14 is deliberately cache-only:
+    # never request a SWEA refresh (which would trigger BigQuery).
+    p.set_defaults(refresh_swea_cache=False)
     p.add_argument("--folds",choices=("all","1","2","3","4"),default="all")
     p.add_argument("--pilot-events-per-fold",type=int,default=0)
     p.add_argument("--max-epochs",type=int,default=150)
