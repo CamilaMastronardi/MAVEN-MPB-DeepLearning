@@ -435,6 +435,7 @@ def train_fold(fold,parts,blocks,rows,a,device):
     })
     print(f"V14 fold {fold}: median={metrics['median_abs_peak_error_s']:.1f}s "
           f"within60={metrics['fraction_within_60s']:.1%} "
+          f"within120={metrics['fraction_within_120s']:.1%} "
           f"evaluable={len(event_rows)}/{len(val)} "
           f"latent_rows={n_latent} alpha={calibration['alpha']:.2f}",
           flush=True)
@@ -521,7 +522,8 @@ def main():
     print(f"V14 DONE: folds={summary['completed_folds']} "
           f"n={summary['n_evaluable_events']} "
           f"median={summary['global_median_absolute_error_s']:.1f}s "
-          f"within60={summary['fraction_within_60s']:.1%}.",flush=True)
+          f"within60={summary['fraction_within_60s']:.1%} "
+          f"within120={summary['fraction_within_120s']:.1%}.",flush=True)
 
 
 if __name__=="__main__":
