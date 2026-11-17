@@ -53,7 +53,7 @@ class SweaAutoencoderV13Tests(unittest.TestCase):
         out=self.model(batch["mag"],batch["mask"])
         self.assertEqual(tuple(out["latent"].shape),(2,3))
         self.assertEqual(
-            tuple(out["reconstruction"].shape),(2,12,32)
+            tuple(out["reconstruction"].shape),(2,12,LENGTH)
         )
         self.assertEqual(tuple(out["offset_s"].shape),(2,))
         loss,metrics=autoencoder_loss(out,batch)
@@ -70,13 +70,13 @@ class SweaAutoencoderV13Tests(unittest.TestCase):
         clip=self.measured_clip(frames=18)
         result=swea_collate([(clip,1,32.)],self.norm)
         self.assertEqual(int(result["mask"].sum()),18)
-        self.assertEqual(result["mag"].shape,(1,12,32))
+        self.assertEqual(result["mag"].shape,(1,12,LENGTH))
         self.assertEqual(
             torch.count_nonzero(
                 result["mag"][:,:,~result["mask"][0]]
             ).item(),0
         )
-        left=(32-18)//2
+        left=(LENGTH-18)//2
         np.testing.assert_array_equal(
             result["mag"][0,:,left:left+18].T.numpy(),clip.swea
         )
@@ -86,6 +86,45 @@ class SweaAutoencoderV13Tests(unittest.TestCase):
             [(self.measured_clip(32),1,0.)],self.norm
         )
         self.assertEqual(int(batch["mask"].sum()),32)
+
+    def test_real_38_frame_window_is_preserved_and_reconstructed(self):
+        clip=self.measured_clip(38)
+        batch=swea_collate([(clip,1,0.)],self.norm)
+        self.assertEqual(int(batch["mask"].sum()),38)
+        left=(LENGTH-38)//2
+        np.testing.assert_array_equal(
+            batch["mag"][0,:,left:left+38].T.cpu().numpy(),
+            clip.swea
+        )
+        self.assertEqual(
+            int(torch.count_nonzero(
+                batch["mag"][:,:,~batch["mask"][0]]
+            )),0
+        )
+        outputs=self.model(batch["mag"],batch["mask"])
+        self.assertEqual(
+            tuple(outputs["reconstruction"].shape),(1,12,LENGTH)
+        )
+        loss,metrics=autoencoder_loss(outputs,batch)
+        self.assertTrue(bool(torch.isfinite(loss)))
+        loss.backward()
+
+    def test_long_128_frame_window_and_upper_capacity(self):
+        for frames in (64,128,LENGTH):
+            with self.subTest(frames=frames):
+                clip=self.measured_clip(frames)
+                batch=swea_collate([(clip,1,0.)],self.norm)
+                self.assertEqual(int(batch["mask"].sum()),frames)
+                reconstructed=self.model(
+                    batch["mag"],batch["mask"]
+                )["reconstruction"]
+                self.assertEqual(
+                    tuple(reconstructed.shape),(1,12,LENGTH)
+                )
+        with self.assertRaisesRegex(ValueError,"256"):
+            swea_collate(
+                [(self.measured_clip(LENGTH+1),1,0.)],self.norm
+            )
 
     def test_invalid_frame_count_rejected(self):
         with self.assertRaises(ValueError):
