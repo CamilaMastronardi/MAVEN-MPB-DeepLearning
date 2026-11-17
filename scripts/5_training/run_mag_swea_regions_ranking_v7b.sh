@@ -86,10 +86,14 @@ python -u scripts/5_training/5b_train_mag_swea_regions.py \
     --output-dir "$OUTPUT_DIR" --resume --execute \
     2>&1 | tee -a "$OUTPUT_DIR/training.log"
 
-if [[ "$PILOT_EVENTS_PER_FOLD" == "0" ]]; then
-    python scripts/7_figures/7a_plot_mag_swea_results.py \
-        --results-dir "$OUTPUT_DIR" \
-        --compare-v5 results/metrics/mag_cv_residual_transition_v1
-else
-    echo "PILOT: figure analysis requires all four complete folds and is skipped."
+figure_args=(
+    --results-dir "$OUTPUT_DIR"
+    --compare-v5 results/metrics/mag_cv_residual_transition_v1
+)
+if [[ "$PILOT_EVENTS_PER_FOLD" != "0" && \
+      -f results/metrics/mag_swea_regions_pilot/cv_summary.json ]]; then
+    figure_args+=(
+        --compare-v7 results/metrics/mag_swea_regions_pilot
+    )
 fi
+python scripts/7_figures/7a_plot_mag_swea_results.py "${figure_args[@]}"
