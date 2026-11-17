@@ -4,6 +4,28 @@ Detection and temporal localization of Martian Magnetic Pileup Boundary (MPB) cr
 
 Final project for **Machine Learning in Geofluids** (DCAO, Universidad de Buenos Aires).
 
+## Current deliverable candidate: V14 (new experiment)
+
+The original V10 localizer is the established four-fold reference. The new
+**V14** retains V10's frozen V7b candidate search, but trains **two new
+eight-layer convolutional autoencoders**, one for MAG and one for SWEA,
+with a **three-scalar latent bottleneck per instrument**. Both bottlenecks
+are used by the temporal refiner and have reconstruction supervision.
+Their 3D embeddings are exported for physical interpretation.
+
+V14 has **not yet been trained or validated**; do not substitute its
+metrics for the completed V10 results until the four folds finish.
+Different folds have different latent axes and must be visualized
+separately. This is conditional localization in labeled MPB neighborhoods,
+not a demonstrated autonomous whole-orbit detector.
+
+- [V14 architecture, training and limitations](docs/v14_dual_3d_refiner.md)
+- [Original V10 reference](docs/mag_swea_refiner_v10.md)
+- [V13 latent-physics exploratory analysis](docs/v13_latent_physics_trajectories.md)
+
+The later sections preserve the historical design and development trail.
+
+
 ## Scientific objective
 
 The MPB is a characteristic plasma boundary in the induced magnetosphere of Mars. The available curated labels provide **one annotated time** (`t_MPB`) for each event, not the four entry/exit times originally contemplated. The supervised goal is therefore **to score how close the annotated MPB time is to the center of a sliding input window**, then recover candidate crossing times from peaks of this score along the orbit.
