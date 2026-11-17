@@ -178,6 +178,62 @@ class V10CalibrationTests(unittest.TestCase):
         self.assertGreater(cfg["alpha"],0.)
         self.assertLess(cfg["monitor_median_error_s"],50.)
 
+    def test_coarse_scan_computes_scores_and_finds_v7b_peak(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from src.data.mpb_dual_windows import DualClip
+
+        when=datetime(2020,1,1,12,tzinfo=timezone.utc)
+        t=when.timestamp()
+        candidates=[
+            SimpleNamespace(center_s=t-32.),
+            SimpleNamespace(center_s=t),
+            SimpleNamespace(center_s=t+32.),
+        ]
+        time_mag=np.arange(-300.,300.,dtype=np.float32)
+        time_swea=np.arange(-288.,289.,32.,dtype=np.float32)
+
+        def make_clip(_mag,_swea,center):
+            level={t-32.:-1.,t:3.,t+32.:0.}[center]
+            return DualClip(
+                mag=np.full((600,4),level,dtype=np.float32),
+                swea=np.zeros((len(time_swea),12),dtype=np.float32),
+                mag_time_s=time_mag,swea_time_s=time_swea,
+            )
+
+        class FakeV7bTeacher:
+            def eval(self):
+                return self
+            def teacher_logits(self,mag,mag_mask,mag_time,
+                               swea,swea_mask,swea_time):
+                logits=mag[:,0,:].mean(-1)
+                return logits,torch.zeros(
+                    (len(logits),2),device=logits.device
+                )
+
+        norm={
+            "MAG":{"mean":np.zeros(4),"scale":np.ones(4)},
+            "SWEA":{"mean":np.zeros(12),"scale":np.ones(12)},
+        }
+        settings=SimpleNamespace(batch_size=2,evaluation_stride_s=32.)
+        row={"time":when,"source_group":"Group1"}
+        with patch.object(v10,"candidate_evaluation_grid",
+                          return_value=candidates),patch.object(
+                              v10,"extract_clip",side_effect=make_clip
+                          ):
+            proposals=v10.teacher_coarse_proposals(
+                FakeV7bTeacher(),[row],
+                {when:{"MAG":(None,None),"SWEA":(None,None)}},
+                norm,np.asarray([t]),np.asarray([t-1200.]),
+                settings,torch.device("cpu")
+            )
+        self.assertEqual(len(proposals),1)
+        self.assertEqual(proposals[0]["coarse_offset_s"],0.)
+        self.assertAlmostEqual(
+            proposals[0]["coarse_logit"],
+            float(torch.sigmoid(torch.tensor(3.)))
+        )
+
     def test_strict_paired_reference_and_fallback(self):
         with tempfile.TemporaryDirectory() as tmp:
             file=Path(tmp)/"base.csv"
