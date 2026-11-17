@@ -213,6 +213,16 @@ def monitor_epoch(model,pools,norm,a,device):
         np.asarray(predicted,dtype=float)-
         np.asarray(offsets,dtype=float)
     )
+    predicted_class=(prob>=.5).astype(int)
+    precision,recall,f1,_=precision_recall_fscore_support(
+        label,predicted_class,average="binary",zero_division=0
+    )
+    report["window_precision_at_0_5"]=float(precision)
+    report["window_recall_at_0_5"]=float(recall)
+    report["window_f1_at_0_5"]=float(f1)
+    report["window_accuracy_at_0_5"]=float(
+        np.mean(predicted_class==label)
+    )
     report["window_roc_auc"]=(
         float(roc_auc_score(label,prob))
         if len(np.unique(label))==2 else None
