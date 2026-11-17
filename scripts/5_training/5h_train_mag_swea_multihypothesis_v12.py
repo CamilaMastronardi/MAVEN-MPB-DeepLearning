@@ -140,6 +140,12 @@ def feature_source_sha(a,path7,path10):
         v7.sha256_file(
             ROOT/"src/detection/mpb_listwise_reranker_v11.py"
         ),
+        v7.sha256_file(
+            ROOT/"src/detection/mpb_region_anchored_refiner.py"
+        ),
+        v7.sha256_file(
+            ROOT/"scripts/5_training/5h_train_mag_swea_multihypothesis_v12.py"
+        ),
         a.topk,a.min_gap_s,a.evaluation_stride_s
     )
 
