@@ -17,9 +17,10 @@ Old MAG checkpoints are incompatible and remain untouched in their folder.
 Usage: python scripts/5_training/5s_train_mag_tanh_8conv_16ch.py --folds 1 \
   --pilot-train 48 --pilot-monitor 12 --pilot-val 12 --epochs 20
 
-Inputs are cached MAG only; no BigQuery access. MPB catalog times are used
-only to build training labels and define evaluation search vicinity, not
-as inference inputs. This is not autonomous orbital MPB detection.
+Inputs are cached MAG only; no BigQuery access. The training script
+reports only retrospective centered reconstruction diagnostics. The separate
+5t evaluator produces ONE global 70-minute classification curve and a single
+MPB estimate per event. This is not autonomous orbital MPB detection.
 """
 from __future__ import annotations
 
@@ -666,98 +667,87 @@ def main():
                   for subset in splits.values() for r in subset}
         fold_out = output/f"fold_{fold:02d}"
         fold_out.mkdir(parents=True, exist_ok=True)
-        all_pred_rows = []
-        plot_results = {}
+        # Train only; final MPB localization belongs to the separate 70-minute
+        # overlap-added evaluator (5t), NOT to any per-window tanh fits.
         centered_diagnostics = {}
         for variant in variants:
             model, norm, details = train_variant(
                 args, fold, variant, splits, blocks, all_mpb, all_bs, fold_out
             )
-            pred_rows = []
+            diagnostics = []
             for n, row in enumerate(splits["val"]):
-                result = search_event(model, row, blocks[row["time"]], norm,
-                                      args.scan_stride, args.max_fits)
-                entry = serialize_result(result, row, variant, fold)
-                entry.update(heldout_centered_diagnostics(
-                    model, row, blocks[row["time"]], norm
-                ))
-                pred_rows.append(entry)
+                clip = extract_window(blocks[row["time"]], row["time"])
+                if clip is None:
+                    diagnostics.append({
+                        "fold": fold, "variant": variant,
+                        "event_utc": row["mpb_timestamp_utc"], "valid_window": False
+                    })
+                    continue
+                t, observed = clip
+                curve, standardized = predict_clip(model, clip, norm)
+                normalized_obs = (observed - norm["mean"]) / norm["scale"]
+                reconstructed = standardized * norm["scale"] + norm["mean"]
+                direction = 1. if row["bs_time"] < row["time"] else -1.
+                tau, _ = estimate_adaptive_tau(blocks[row["time"]], row["time"])
+                if variant == "fixed":
+                    tau = 60.
+                target = direction * np.tanh(t / tau)
+                rec_mse = float(np.mean((standardized-normalized_obs)**2))
+                class_mse = float(np.mean((curve-target)**2))
+                magnetic_norm = np.linalg.norm(reconstructed[:, :3], axis=1)
+                norm_rmse = float(np.sqrt(np.mean(
+                    (reconstructed[:, 3]-magnetic_norm)**2
+                )))
+                diagnostics.append({
+                    "fold": fold, "variant": variant,
+                    "event_utc": row["mpb_timestamp_utc"], "valid_window": True,
+                    "target_tau_s": tau, "centered_reconstruction_mse": rec_mse,
+                    "centered_classification_mse": class_mse,
+                    "centered_magnitude_consistency_rmse_nt": norm_rmse
+                })
                 if n < args.plot_events:
-                    plot_results.setdefault(row["time"], {"row": row})[variant] = (result, norm)
-                    centered_clip = extract_window(blocks[row["time"]], row["time"])
-                    if centered_clip is not None:
-                        centered_y, centered_field = predict_clip(model, centered_clip, norm)
-                        centered_diagnostics.setdefault(row["time"], {"row": row})[variant] = (
-                            centered_clip[0], centered_clip[1], centered_y, centered_field, norm
-                        )
-                print(f"Fold {fold} {variant} VAL {n+1}/{len(splits['val'])}: "
-                      f"error={pred_rows[-1].get('abs_error_s')}", flush=True)
-            write_csv(fold_out/f"fold_{fold:02d}_{variant}_events.csv", pred_rows)
-            all_pred_rows += pred_rows
-            errors = [r["abs_error_s"] for r in pred_rows if r["evaluated"]]
-            recvals = [r["centered_reconstruction_mse"] for r in pred_rows
-                       if r["centered_reconstruction_mse"] is not None]
-            consvals = [r["centered_magnitude_consistency_rmse_nt"] for r in pred_rows
-                        if r["centered_magnitude_consistency_rmse_nt"] is not None]
-            report = {"fold": fold, "variant": variant,
-                      "val_centered_rec_n": len(recvals),
-                      "val_centered_rec_mse": float(np.mean(recvals)) if recvals else None,
-                      "val_centered_consistency_rmse_nt": float(np.mean(consvals)) if consvals else None,
-                      "val_count": len(pred_rows), "evaluable": len(errors),
-                      "evaluable_fraction": len(errors)/len(pred_rows),
-                      "fraction_within_60s_over_all": sum(e <= 60 for e in errors)/len(pred_rows),
-                      "fraction_within_120s_over_all": sum(e <= 120 for e in errors)/len(pred_rows),
-                      "median_abs_error_s": float(np.median(errors)) if errors else None,
-                      "fraction_within_60s": sum(e <= 60 for e in errors)/len(errors) if errors else None,
-                      "fraction_within_120s": sum(e <= 120 for e in errors)/len(errors) if errors else None,
-                      **details}
+                    centered_diagnostics.setdefault(
+                        row["time"], {"row": row}
+                    )[variant] = (t, observed, curve, standardized, norm)
+            write_csv(
+                fold_out/f"fold_{fold:02d}_{variant}_centered_diagnostics.csv",
+                diagnostics
+            )
+            valid = [d for d in diagnostics if d.get("valid_window")]
+            report = {
+                "fold": fold, "variant": variant,
+                "validation_window_count": len(diagnostics),
+                "validation_valid_count": len(valid),
+                "val_centered_rec_mse": (
+                    float(np.mean([d["centered_reconstruction_mse"] for d in valid]))
+                    if valid else None
+                ),
+                "val_centered_classification_mse": (
+                    float(np.mean([d["centered_classification_mse"] for d in valid]))
+                    if valid else None
+                ),
+                "val_centered_consistency_rmse_nt": (
+                    float(np.mean([
+                        d["centered_magnitude_consistency_rmse_nt"] for d in valid
+                    ])) if valid else None
+                ),
+                **details,
+            }
             summary.append(report)
-            print(f"{variant} fold {fold} summary: {report}", flush=True)
-        # Fair paired comparison: only events localized by ALL variants.
-        if len(variants) > 1:
-            successful = None
-            for variant in variants:
-                ids = {r["event_utc"] for r in all_pred_rows if
-                       r["variant"] == variant and r["evaluated"]}
-                successful = ids if successful is None else successful & ids
-            paired = [r for r in all_pred_rows if r["evaluated"] and
-                      r["event_utc"] in successful]
-            write_csv(fold_out/f"fold_{fold:02d}_paired_events.csv", paired)
+            print(
+                f"{variant} fold {fold} trained: best epoch={details['best_epoch']}; "
+                f"centered val windows={len(valid)}/{len(diagnostics)}. "
+                "Run 5t for GLOBAL 70-minute MPB localization.",
+                flush=True
+            )
         for j, (event, stored) in enumerate(centered_diagnostics.items()):
-            traces = {key: value for key, value in stored.items() if key != "row"}
+            traces = {key: value for key, value in stored.items()
+                      if key != "row"}
             if traces:
                 save_centered_diagnostic(
                     fold_out/f"fold_{fold:02d}_diagnostic_centered_{j+1:02d}.png",
                     stored["row"], traces
                 )
-        for j, (event, stored) in enumerate(plot_results.items()):
-            # Each variant has its own fold-normalizer; only use respective norm.
-            fig, axes = plt.subplots(2, 1, figsize=(11, 7), sharex=True)
-            for variant in variants:
-                if variant not in stored:
-                    continue
-                res, norm = stored[variant]
-                if res is None:
-                    continue
-                t, x = res["clip"]
-                ts = t + res["center_offset_s"]
-                axes[0].plot(ts, res["curve"], alpha=.5, label=f"{variant} clasificación")
-                axes[0].plot(ts, res["tanh"], ls="--", label=f"{variant} tanh")
-                axes[0].axvline(res["pred_s"]-event, ls=":", label=f"{variant} MPB")
-                field = res["reconstructed_field"]*norm["scale"]+norm["mean"]
-                axes[1].plot(ts, field[:, 3], label=f"{variant} |B| reconstruido", alpha=.8)
-                if variant == variants[0]:
-                    axes[1].plot(ts, x[:, 3], color="k", alpha=.3, label="|B| observado")
-            axes[0].axvline(0, color="k", ls="--", label="MPB catálogo")
-            axes[1].axvline(0, color="k", ls="--")
-            axes[0].set_ylabel("Clase continua [-1,1]")
-            axes[1].set_ylabel("|B| (nT)")
-            for ax in axes:
-                ax.legend(fontsize=8)
-                ax.set_xlabel("Tiempo respecto de MPB catálogo (s)")
-            fig.tight_layout()
-            fig.savefig(fold_out/f"fold_{fold:02d}_example_{j+1:02d}.png", dpi=160)
-            plt.close(fig)
         del blocks
     (output/"summary.json").write_text(json.dumps({"configuration": vars(args),
         "results": summary}, default=str, indent=2)+"\n", encoding="utf-8")
