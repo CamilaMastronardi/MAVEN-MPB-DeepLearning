@@ -72,6 +72,15 @@ results/metrics/v14_dual_5d_refiner_pilot/
   training.log
 ```
 
+En la terminal se informa por fold el **error mediano** y
+los porcentajes `within60` (error absoluto <=60 s) y
+`within120` (error absoluto <=120 s).
+Ambos porcentajes se calculan sobre los eventos evaluables.
+Los valores exactos están también en
+`fold_XX_metrics.json` como `fraction_within_60s` y
+`fraction_within_120s`, y en `cv_summary.json`
+para el conjunto combinado.
+
 Una vez verificado el piloto, para los cuatro folds completos:
 
 ```bash
