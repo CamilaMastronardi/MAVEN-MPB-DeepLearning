@@ -63,6 +63,7 @@ python -m py_compile \
     scripts/5_training/5l_preflight_v10_hp1_cache.py \
     tests/test_mag_swea_refiner_v10.py
 python -m unittest discover -s tests -p 'test_mag_swea_refiner_v10.py' -v
+python -m unittest discover -s tests -p 'test_v10_hp2_calibration.py' -v
 
 python scripts/5_training/5l_preflight_v10_hp1_cache.py \
     --manifest "$MANIFEST" \
