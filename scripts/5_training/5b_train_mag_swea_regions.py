@@ -41,7 +41,12 @@ from src.data.swea_event_cache import (
     SweaEventCache, ENERGY_EV, energy_features
 )
 from src.data.mpb_weak_regions import (
-    candidate_training_grid, candidate_evaluation_grid
+    candidate_training_grid, candidate_evaluation_grid,
+    candidate_ranking_grid,
+)
+from src.detection.mpb_event_ranking import (
+    event_pairwise_ranking_loss, numpy_event_rank_metrics,
+    select_rank_event_groups, event_group_batches, update_hard_memory,
 )
 from src.data.mpb_dual_windows import (
     extract_clip, fit_unique_epochs, collate_dual
@@ -80,6 +85,15 @@ def args_parser():
     p.add_argument("--learning-rate", type=float, default=0.0003)
     p.add_argument("--reconstruction-weight", type=float, default=0.15)
     p.add_argument("--region-weight", type=float, default=0.5)
+    p.add_argument("--rank-weight", type=float, default=0.,
+                   help="0 preserves original v7; >0 activates same-event ranking.")
+    p.add_argument("--rank-margin", type=float, default=0.5,
+                   help="Pairwise margin applied to transition logits.")
+    p.add_argument("--rank-control-step-s", type=float, default=120.,
+                   help="Stride of conservative candidate negative pool.")
+    p.add_argument("--rank-positives-per-event", type=int, default=2)
+    p.add_argument("--rank-hard-negatives", type=int, default=2)
+    p.add_argument("--rank-random-negatives", type=int, default=2)
     p.add_argument("--evaluation-stride-s", type=float, default=32.)
     p.add_argument("--torch-threads", type=int, default=2)
     p.add_argument("--max-query-gib", type=float, default=2.)
@@ -98,8 +112,19 @@ def args_parser():
     )
     if (min(positive) <= 0 or args.min_epochs > args.max_epochs or
             args.pilot_events_per_fold < 0 or
-            args.reconstruction_weight < 0 or args.region_weight < 0):
-        p.error("Invalid positive parameters or epoch limits.")
+            args.reconstruction_weight < 0 or args.region_weight < 0 or
+            args.rank_weight < 0 or args.rank_margin < 0 or
+            not 0 < args.rank_control_step_s <= 600.):
+        p.error("Invalid positive parameters, rank weights or epoch limits.")
+    if args.rank_weight > 0:
+        group_size = (args.rank_positives_per_event +
+                      args.rank_hard_negatives + args.rank_random_negatives)
+        if (min(args.rank_positives_per_event,
+                args.rank_hard_negatives,
+                args.rank_random_negatives) < 1 or
+                args.batch_size < group_size):
+            p.error("Ranking requires >=1 of each class/mining type and "
+                    "a batch large enough to hold a complete event group.")
     return args
 
 
@@ -332,12 +357,26 @@ def make_signature(args, fold, fit, monitor, val):
         "reconstruction_weight": args.reconstruction_weight,
         "evaluation_stride_s": args.evaluation_stride_s,
     }
+    # Preserve original v7 signatures and existing checkpoints when the
+    # ranking extension is disabled. V7 ranking has a distinct signature.
+    if args.rank_weight > 0:
+        params.update({
+            "model": "v7b-dual-native-regime-ranking-v1",
+            "rank_weight": args.rank_weight,
+            "rank_margin": args.rank_margin,
+            "rank_control_step_s": args.rank_control_step_s,
+            "rank_positives_per_event": args.rank_positives_per_event,
+            "rank_hard_negatives": args.rank_hard_negatives,
+            "rank_random_negatives": args.rank_random_negatives,
+            "monitor_selection": "det+region+rank; inner TRAIN months",
+            "hard_negative_mode": "online previous-epoch TRAIN memory",
+        })
     return hashlib.sha256(json.dumps(params, sort_keys=True).encode()).hexdigest()
 
 
 def gather_candidates(
     events, blocks, all_mpb_s, all_bs_s, *, evaluate=False,
-    stride_s=32.
+    stride_s=32., ranking=False, rank_control_step_s=120.
 ):
     """Build only verified measured dual clips; retain explicit skip counts."""
     records = {}
@@ -348,8 +387,13 @@ def gather_candidates(
         grid = (
             candidate_evaluation_grid(
                 row, all_mpb_s, all_bs_s, step_s=stride_s
-            ) if evaluate else candidate_training_grid(
-                row, all_mpb_s, all_bs_s
+            ) if evaluate else (
+                candidate_ranking_grid(
+                    row, all_mpb_s, all_bs_s,
+                    step_s=rank_control_step_s,
+                ) if ranking else candidate_training_grid(
+                    row, all_mpb_s, all_bs_s
+                )
             )
         )
         prepared = []
