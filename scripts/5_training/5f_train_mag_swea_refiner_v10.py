@@ -235,7 +235,8 @@ def teacher_coarse_proposals(
                 batch["mag"],batch["mag_mask"],batch["mag_time"],
                 batch["swea"],batch["swea_mask"],batch["swea_time"]
             )
-            # Match V7b evaluation exactly, including sigmoid ties.\n            values=torch.sigmoid(logits).cpu().numpy()
+            # Match V7b evaluation exactly, including sigmoid ties.
+            values=torch.sigmoid(logits).cpu().numpy()
             max_index=int(np.argmax(values))
             if float(values[max_index])>best_logit:
                 best_logit=float(values[max_index])
