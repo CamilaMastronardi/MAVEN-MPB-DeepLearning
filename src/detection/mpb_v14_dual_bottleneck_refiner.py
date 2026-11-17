@@ -1,13 +1,13 @@
-"""V14: V10 coarse-to-fine MPB locator with two 8-conv 3D bottlenecks.
+"""V14: V10 coarse-to-fine MPB locator with two 8-conv 5D bottlenecks.
 
 Keep V7b strictly frozen as the coarse candidate proposer. Unlike V10's
 16-channel temporal teacher representation, the trainable FINE model uses
-only two independent three-SCALAR embeddings (MAG and SWEA) to predict its
+only two independent five-SCALAR embeddings (MAG and SWEA) to predict its
 temporal correction. Each embedding is produced by eight Conv1d layers
 and regularized by a decoder reconstructing the measured input.
 
 Do not confuse the old frozen V7b encoder (16 temporal channels) with
-the NEW interpretable V14 bottlenecks (three coordinates per sensor).
+the NEW interpretable V14 bottlenecks (five coordinates per sensor).
 The catalog MPB time is never part of the neural-network input.
 """
 from __future__ import annotations
@@ -17,12 +17,75 @@ from torch import nn
 from torch.nn import functional as F
 
 from src.detection.mag_swea_region_model import MagSweaRegionAutoencoder
-from src.detection.mpb_cnn_autoencoder_v13 import (
-    Conv3DAutoencoder, LENGTH as MAG_LENGTH,
-)
-from src.detection.mpb_swea_autoencoder_v13 import (
-    SWEA3DAutoencoder, LENGTH as SWEA_LENGTH,
-)
+# Keep the original V13 3D autoencoders unchanged. V14 now uses the
+# same eight-convolution layout with a five-SCALAR latent vector.
+MAG_LENGTH=640
+SWEA_LENGTH=256
+LATENT_DIM=5
+
+
+class SensorFiveLatentAE(nn.Module):
+    """V13-style eight-convolution encoder/decoder with z in R^5."""
+
+    def __init__(self,sensor):
+        super().__init__()
+        if sensor=="MAG":
+            features,length=4,MAG_LENGTH
+            widths=(4,16,24,32,40,48,56,64,64)
+            strides=(2,)*8
+            conv_end=3
+            decode_sizes=(5,10,20,40,80,160,320,640)
+            decode_widths=(64,64,56,48,40,32,24,16,4)
+        elif sensor=="SWEA":
+            features,length=12,SWEA_LENGTH
+            widths=(12,16,24,32,40,48,56,64,64)
+            strides=(2,2,2,2,2,2,2,1)
+            conv_end=2
+            decode_sizes=(2,4,8,16,32,64,128,256)
+            decode_widths=(64,64,56,48,40,32,24,16,12)
+        else:
+            raise ValueError("Unknown V14 instrument")
+        self.features=features
+        self.length=length
+        self.conv_end=conv_end
+        self.decode_sizes=decode_sizes
+        self.encoder_layers=nn.ModuleList([
+            nn.Sequential(
+                nn.Conv1d(widths[i],widths[i+1],
+                          kernel_size=5,stride=strides[i],padding=2),
+                nn.GELU(),
+            ) for i in range(8)
+        ])
+        self.to_latent=nn.Linear(64*conv_end,LATENT_DIM)
+        self.from_latent=nn.Linear(LATENT_DIM,64*conv_end)
+        self.decoder_layers=nn.ModuleList([
+            nn.Conv1d(decode_widths[i],decode_widths[i+1],5,padding=2)
+            for i in range(8)
+        ])
+
+    def encode(self,x,mask):
+        if (x.ndim!=3 or x.shape[1:]!=(self.features,self.length)
+                or mask.shape!=(len(x),self.length)):
+            raise ValueError("Invalid padded V14 sensor samples or mask")
+        h=x*mask[:,None,:].to(x.dtype)
+        for layer in self.encoder_layers:
+            h=layer(h)
+        if h.shape[1:]!=(64,self.conv_end):
+            raise RuntimeError("Unexpected V14 convolutional time shape")
+        return self.to_latent(h.flatten(1))
+
+    def decode(self,z):
+        if z.ndim!=2 or z.shape[1]!=LATENT_DIM:
+            raise ValueError("V14 latent must be [batch,5]")
+        h=self.from_latent(z).reshape(-1,64,self.conv_end)
+        for i,(size,layer) in enumerate(zip(
+            self.decode_sizes,self.decoder_layers
+        )):
+            h=F.interpolate(h,size=size,mode="nearest")
+            h=layer(h)
+            if i<7:
+                h=F.gelu(h)
+        return h
 
 
 def center_pad_native(x, mask, target_length, min_count):
@@ -57,9 +120,9 @@ def masked_mse(pred,target,mask):
 
 
 class V14DualBottleneckRefiner(nn.Module):
-    """Two trainable 3D AEs + time refinement anchored on frozen V7b."""
+    """Two trainable 5D AEs + time refinement anchored on frozen V7b."""
 
-    ARCHITECTURE="v14-v10-coarse-8conv-3d-mag-8conv-3d-swea-v1"
+    ARCHITECTURE="v14-v10-coarse-8conv-5d-mag-8conv-5d-swea-v1"
 
     def __init__(self,v7b_state,*,dropout=.1,max_offset_s=250.,
                  basis_width_s=24.):
@@ -72,13 +135,12 @@ class V14DualBottleneckRefiner(nn.Module):
         self.teacher.load_state_dict(v7b_state,strict=True)
         self.teacher.requires_grad_(False)
         self.teacher.eval()
-        # These are precisely 8 Conv1d ENCODER layers and z in R^3,
-        # not 3 temporal feature-map channels.
-        self.mag_ae=Conv3DAutoencoder(dropout=dropout)
-        self.swea_ae=SWEA3DAutoencoder(dropout=dropout)
-        # [z_MAG(3),z_SWEA(3),teacher transition(1),teacher sides(2)]
+        # Eight Conv1d encoder layers, each with FIVE scalar coordinates.
+        self.mag_ae=SensorFiveLatentAE("MAG")
+        self.swea_ae=SensorFiveLatentAE("SWEA")
+        # [z_MAG(5),z_SWEA(5),teacher transition(1),teacher sides(2)]
         self.fusion=nn.Sequential(
-            nn.Linear(9,64),nn.GELU(),nn.Dropout(dropout),
+            nn.Linear(2*LATENT_DIM+3,64),nn.GELU(),nn.Dropout(dropout),
             nn.Linear(64,64),nn.GELU(),
         )
         # 21 overlapping Gaussian time basis functions at native MAG times;
@@ -109,7 +171,7 @@ class V14DualBottleneckRefiner(nn.Module):
         return pm,mm,ps,ms
 
     def encode_latents(self,mag,mag_mask,swea,swea_mask):
-        """Return per-window scalar [z1,z2,z3] for each sensor."""
+        """Return a five-scalar vector [z1,...,z5] for each sensor."""
         pm,mm,ps,ms=self._padded_inputs(mag,mag_mask,swea,swea_mask)
         return self.mag_ae.encode(pm,mm),self.swea_ae.encode(ps,ms)
 
