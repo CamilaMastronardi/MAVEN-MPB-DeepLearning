@@ -647,11 +647,13 @@ def group_agreement(rows,clustering_joint,mag_reference,
               if r["split"]=="outer_holdout"]
     outer_silhouette=None
     if len(idx_hold)>len(set(np.asarray(joint)[idx_hold]))>1:
+        joint_by_iso={
+            t.isoformat():rec["latent"]
+            for t,rec in joint_embeddings.items()
+        }
         raw=np.asarray([
-            joint_embeddings[
-                next(t for t in joint_embeddings
-                     if t.isoformat()==complete[i]["mpb_timestamp_utc"])
-            ]["latent"] for i in idx_hold
+            joint_by_iso[complete[i]["mpb_timestamp_utc"]]
+            for i in idx_hold
         ])
         standardized=(raw-clustering_joint["scaler_mean"])/(
             clustering_joint["scaler_scale"]
@@ -706,8 +708,12 @@ def joint_analysis(a,selected,fit,outer,split,embeddings):
         raise RuntimeError("No matched MAG-SWEA crossing latents.")
     # Both KMeans use only FIT examples. No feature from held-out
     # events contributes to normalizers, centroids or chosen k.
-    swea_cluster=choose_clustering(fit,embeddings,a)
-    joint_cluster=choose_clustering(fit,common,a)
+    # The standalone SWEA and joint FIT silhouettes must use identical
+    # crossing events. SWEA-only assignments can still cover additional
+    # crossings that lack a valid MAG bottleneck.
+    common_fit=[r for r in fit if r["time"] in common]
+    swea_cluster=choose_clustering(common_fit,embeddings,a)
+    joint_cluster=choose_clustering(common_fit,common,a)
     swea_rows=assign_groups(selected,embeddings,swea_cluster,split)
     joint_rows=merged_table(
         selected,split,mag,embeddings,swea_cluster,common,joint_cluster
