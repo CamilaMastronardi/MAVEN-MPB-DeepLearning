@@ -21,6 +21,7 @@ import json
 import random
 import sys
 from collections import Counter,defaultdict
+from datetime import datetime
 from importlib import import_module
 from pathlib import Path
 
@@ -481,7 +482,9 @@ def _plot_example(row,block,paths,folder):
     import matplotlib.pyplot as plt
     from matplotlib.colors import Normalize
     fig=plt.figure(figsize=(12,8))
-    t=row["time"].timestamp()
+    # Representatives come from physical_features.csv rows, which use
+    # the ISO timestamp column, not the manifest's datetime "time" key.
+    t=datetime.fromisoformat(row["mpb_timestamp_utc"]).timestamp()
     mag_t,mag_b=block["MAG"]
     swea_t,swea_flux=block["SWEA"]
     mag_mask=(mag_t>=t-300)&(mag_t<=t+300)
@@ -758,8 +761,7 @@ def main():
     for r in trajectories:
         trajectory_index[r["mpb_timestamp_utc"]][r["sensor"]].append(r)
     for item in examples:
-        import datetime
-        when=datetime.datetime.fromisoformat(item["mpb_timestamp_utc"])
+        when=datetime.fromisoformat(item["mpb_timestamp_utc"])
         _plot_example(
             item,blocks[when],
             trajectory_index[item["mpb_timestamp_utc"]],
