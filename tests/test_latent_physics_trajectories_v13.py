@@ -128,8 +128,24 @@ class StatisticsTests(unittest.TestCase):
         ))
         self.assertTrue(any(
             r["feature"]=="swea_abs_spectral_delta_logflux"
+            and r["latent_axis"]=="sweaz1"
+            and r["n"]>=12
             for r in pairs
         ))
+        # Both instruments must have real, finite correlations, not
+        # silent all-NaN outputs from a mistyped latent-column name.
+        for axis,feature in (
+            ("magz1","mag_rotation_deg"),
+            ("sweaz1","swea_abs_spectral_delta_logflux")
+        ):
+            found=[
+                r for r in pairs
+                if r["latent_axis"]==axis and
+                r["feature"]==feature and r["split"]=="fit"
+            ]
+            self.assertEqual(len(found),1)
+            self.assertTrue(np.isfinite(found[0]["rho"]))
+            self.assertTrue(np.isfinite(found[0]["q_fit_bh"]))
 
     def test_original_embedding_matches_nine_shifted_views(self):
         track=[
