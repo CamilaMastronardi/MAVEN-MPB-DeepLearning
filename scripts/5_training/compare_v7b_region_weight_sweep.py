@@ -4,7 +4,7 @@
 Checkpoint selection was already done within each run on its INNER-month
 monitor. Hyperparameter selection here is based ONLY on inner-monitor
 ranking top-1 accuracy (tie: pair accuracy, smaller region weight).
-Outer-fold metrics remain exploratory for individual margins; the per-fold
+Outer-fold metrics remain exploratory for individual region weights; the per-fold
 inner-selected combination is the nested-evaluation result.
 
 No BigQuery, PyTorch, network access, or source data are read.
@@ -72,7 +72,7 @@ def expect_equal(value, expected, what: str) -> None:
 
 
 def monitor_selection_key(result: dict) -> tuple:
-    """Common region-INDEPENDENT score for all four model variants.
+    """Common region-weight-independent score for all four model variants.
 
     Compare weight-independent top-1 and pair accuracy of the monitor,
     not the BCE-weighted checkpoint losses between different region weights.
@@ -141,6 +141,18 @@ def load_region_dir(root: Path, region: float, folder: str,
     return summary, data
 
 
+def percentile_linear(values: list[float], p: float) -> float | None:
+    """Percentile with linear interpolation on sorted observed errors."""
+    if not values:
+        return None
+    ordered = sorted(values)
+    position = p * (len(ordered) - 1)
+    lower = int(position)
+    upper = min(lower + 1, len(ordered) - 1)
+    fraction = position - lower
+    return ordered[lower] * (1 - fraction) + ordered[upper] * fraction
+
+
 def error_stats(events: list[dict]) -> dict:
     errors = [ev["abs_error_s"] for ev in events
               if ev["abs_error_s"] is not None]
@@ -152,6 +164,7 @@ def error_stats(events: list[dict]) -> dict:
         "n_evaluable": evaluable,
         "evaluable_fraction": evaluable / n,
         "median_abs_error_s": statistics.median(errors) if errors else None,
+        "p90_abs_error_s": percentile_linear(errors, 0.9),
         "within_60s_over_all": sum(e <= 60 for e in errors) / n,
         "within_120s_over_all": sum(e <= 120 for e in errors) / n,
         "within_60s_among_evaluable": (
