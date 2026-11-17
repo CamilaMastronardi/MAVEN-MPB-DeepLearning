@@ -187,3 +187,13 @@ con etiquetas débiles, no detección orbital independiente.
   ninguna mejora puede atribuirse causalmente a SWEA sin una ablación
   MAG-only del clasificador de regiones.
 - Los modelos v1-v6 y sus checkpoints no se modifican.
+
+## Revisión posterior v7b
+
+Ante el F1 bajo en candidatos y numerosos falsos positivos del piloto,
+se desarrolló una revisión que **conserva ambos encoders MAG/SWEA**,
+pero agrega ranking por evento y minería online de controles negativos
+difíciles, además de seleccionar el checkpoint con ranking en el
+monitor interno. Esta versión tiene launcher y carpeta independientes:
+`scripts/5_training/run_mag_swea_regions_ranking_v7b.sh`.
+Ver `docs/mag_swea_seventh_ranking.md`.
