@@ -58,7 +58,7 @@ def cached_files(directory: Path, manifest: dict) -> list[tuple[float, Path]]:
 
 
 def measure(event_time: float, file: Path, row: dict,
-            tau_min: float, tau_max: float) -> dict | None:
+            tau_min: float, tau_max: float, derivative_window_s: float) -> dict | None:
     if not row.get("bs_timestamp_utc"):
         return None
     bs = utc_seconds(row["bs_timestamp_utc"])
@@ -84,14 +84,27 @@ def measure(event_time: float, file: Path, row: dict,
     smooth = savgol_filter(bmag, 31, 2)
     before = (t >= -150) & (t <= -60)
     after = (t >= 60) & (t <= 150)
-    middle = (t >= -45) & (t <= 45)
+    # Un minuto total alrededor de la MPB: t_MPB +/- 30 s por defecto.
+    half_window = derivative_window_s / 2
+    middle = (t >= -half_window) & (t <= half_window)
     if min(before.sum(), after.sum(), middle.sum()) < 15:
         return None
     jump = float(np.median(smooth[after]) - np.median(smooth[before]))
     noise = float(1.4826 * np.median(np.abs(bmag - smooth)))
     derivative = np.gradient(smooth, t)
-    slope = float(np.percentile(np.abs(derivative[middle]), 85))
-    reliable = abs(jump) > max(1.0, 3 * noise) and slope > 0.01
+    # Promedio CON SIGNO: los picos y cambios de sentido se compensan.
+    # Una media de |dB/dt| seguiria aumentando por fluctuaciones rapidas.
+    signed_slope = float(np.mean(derivative[middle]))
+    slope = abs(signed_slope)
+    same_direction = (np.sign(signed_slope) == np.sign(jump))
+    reliable = (
+        abs(jump) > max(1.0, 3 * noise)
+        and slope > 0.01
+        and same_direction
+    )
+    # Escala heuristica: para una tanh ideal, su derivada CENTRAL maxima
+    # seria |DeltaB|/(2*tau). La media de la derivada en 60 s no es ese
+    # maximo: tau se interpreta como parametro objetivo, no espesor real.
     raw_tau = abs(jump) / (2 * slope) if reliable else float("nan")
     tau = float(np.clip(raw_tau, tau_min, tau_max)) if reliable else 60.0
 
@@ -108,6 +121,9 @@ def measure(event_time: float, file: Path, row: dict,
         "tau_unclipped_s": raw_tau,
         "jump_nt": jump,
         "slope_nt_per_s": slope,
+        "signed_mean_slope_nt_per_s": signed_slope,
+        "derivative_window_s": derivative_window_s,
+        "slope_direction_matches_jump": bool(same_direction),
         "noise_nt": noise,
         "reliable_slope": reliable,
         "label_direction": direction,
@@ -127,11 +143,15 @@ def main() -> None:
                         help="Máximo de eventos válidos para la figura")
     parser.add_argument("--tau-min", type=float, default=10.)
     parser.add_argument("--tau-max", type=float, default=120.)
+    parser.add_argument("--derivative-window-s", type=float, default=60.,
+                        help="Duración total (s) de la media de d|B|/dt centrada en MPB")
     parser.add_argument("--output-dir", type=Path, default=None)
     args = parser.parse_args()
     if (args.scan_events < 1 or args.plot_events < 1 or
-            not 0 < args.tau_min < 60 < args.tau_max):
-        parser.error("Parámetros inválidos: scan/plot > 0 y tau-min < 60 < tau-max")
+            not 0 < args.tau_min < 60 < args.tau_max or
+            not 10 <= args.derivative_window_s <= 180):
+        parser.error("Parámetros inválidos: scan/plot > 0, tau-min < 60 < tau-max, "
+                     "10 <= derivative-window-s <= 180")
 
     root = locate_root(args.root.resolve())
     manifest = catalog(root / "data/splits/cv4_monthly_manifest.csv")
@@ -146,7 +166,8 @@ def main() -> None:
     analyzed = []
     for i in ids:
         event, file = files[int(i)]
-        result = measure(event, file, manifest[event], args.tau_min, args.tau_max)
+        result = measure(event, file, manifest[event], args.tau_min, args.tau_max,
+                         args.derivative_window_s)
         if result is not None:
             analyzed.append(result)
     if not analyzed:
@@ -155,7 +176,9 @@ def main() -> None:
     out = (args.output_dir or (root / "results/figures/mag_tanh_pilot")).resolve()
     out.mkdir(parents=True, exist_ok=True)
     columns = ["event_utc", "fold", "group", "tau_s", "tau_unclipped_s",
-               "jump_nt", "slope_nt_per_s", "noise_nt", "reliable_slope",
+               "jump_nt", "slope_nt_per_s", "signed_mean_slope_nt_per_s",
+               "derivative_window_s", "slope_direction_matches_jump",
+               "noise_nt", "reliable_slope",
                "label_direction", "median_magnitude_mismatch_nt", "n_mag_samples"]
     with (out / "mag_tanh_event_summary.csv").open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=columns)
@@ -173,6 +196,9 @@ def main() -> None:
         ax.plot(t, result["smooth"], label="|B| suavizado", linewidth=1.5)
         ax.axvspan(-150, -60, color="gray", alpha=0.10)
         ax.axvspan(60, 150, color="gray", alpha=0.10)
+        ax.axvspan(-args.derivative_window_s / 2,
+                   args.derivative_window_s / 2, color="purple", alpha=0.12,
+                   label="Intervalo de derivada media")
         ax.axvline(0, color="gray", ls="--", label="MPB catalogada")
         ax.set_ylabel("|B| (nT)")
         ax.set_xlim(-300, 300)
@@ -183,7 +209,9 @@ def main() -> None:
         ax2.set_ylabel("Etiqueta débil de región")
         ax.set_title(f'{result["event_utc"]} | fold {result["fold"]} | '
                      f'Δ|B|={result["jump_nt"]:.1f} nT | '
-                     f'τ={result["tau_s"]:.1f} s | pendiente fiable={result["reliable_slope"]}')
+                     f'τ={result["tau_s"]:.1f} s | '
+                     f'media d|B|/dt={result["signed_mean_slope_nt_per_s"]:+.3f} nT/s | '
+                     f'fiable={result["reliable_slope"]}')
         ax.set_xlabel("Tiempo respecto de MPB (s)")
         ax.legend(loc="upper left", fontsize=8)
     fig.tight_layout()
@@ -194,6 +222,8 @@ def main() -> None:
     n_reliable = sum(r["reliable_slope"] for r in analyzed)
     print(f"Eventos analizados: {len(analyzed)} / {len(ids)}")
     print(f"Pendiente fiable: {n_reliable}/{len(analyzed)}")
+    print(f"Ventana de derivada media: {args.derivative_window_s:.0f} s "
+          f"(+/-{args.derivative_window_s / 2:g} s respecto de MPB)")
     print(f"Tau mediana: {np.median([r['tau_s'] for r in analyzed]):.1f} s")
     print(f"Resultados: {out}")
     print(f"- {output.name}")
