@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Grafica la tanh objetivo y la clasificacion reconstruida para MAG.
 
-Usa checkpoints existentes de 5o_train_mag_tanh_zero.py y datos MAG
+Usa checkpoints existentes de 5o (anterior) o 5q (8 Conv1d, latente 3D) y datos MAG
 originales en cache. No reentrena, no consulta BigQuery.
 
 La figura muestra una ventana de 600 s centrada en la MPB catalogada:
@@ -25,14 +25,17 @@ import numpy as np
 import torch
 
 ROOT = Path(__file__).resolve().parents[2]
-TRAIN_SCRIPT = ROOT / "scripts/5_training/5o_train_mag_tanh_zero.py"
+TRAIN_SCRIPTS = {
+    "legacy": ROOT / "scripts/5_training/5o_train_mag_tanh_zero.py",
+    "8conv3d": ROOT / "scripts/5_training/5q_train_mag_tanh_8conv_3d.py",
+}
 VARIANTS = ("fixed", "adaptive", "consistent")
 
 
-def load_training_module():
-    spec = importlib.util.spec_from_file_location("mag_tanh_train_plot", TRAIN_SCRIPT)
+def load_training_module(script):
+    spec = importlib.util.spec_from_file_location("mag_tanh_train_plot", script)
     if spec is None or spec.loader is None:
-        raise FileNotFoundError(f"No se pudo importar {TRAIN_SCRIPT}")
+        raise FileNotFoundError(f"No se pudo importar {script}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
@@ -41,6 +44,7 @@ def load_training_module():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--architecture", choices=("legacy", "8conv3d"), default="legacy")
     parser.add_argument("--fold", type=int, choices=(1, 2, 3, 4), default=1)
     parser.add_argument("--event-index", type=int, default=0,
                         help="Indice (desde cero) de eventos del fold seleccionado")
@@ -49,18 +53,28 @@ def main():
     parser.add_argument("--torch-threads", type=int, default=2)
     parser.add_argument(
         "--output-dir", type=Path,
-        default=ROOT / "results/figures/mag_tanh_reconstruction"
+        default=None
     )
     parser.add_argument(
         "--checkpoints-dir", type=Path,
-        default=ROOT / "results/metrics/mag_tanh_zero_pilot"
+        default=None
     )
     args = parser.parse_args()
     if args.event_index < 0 or args.pilot_val < 0 or args.torch_threads < 1:
         parser.error("event-index >= 0, pilot-val >= 0 y torch-threads >= 1")
     torch.set_num_threads(args.torch_threads)
+    if args.checkpoints_dir is None:
+        args.checkpoints_dir = ROOT / "results/metrics" / (
+            "mag_tanh_global_8conv_3d_class3_pilot" if args.architecture == "8conv3d"
+            else "mag_tanh_zero_pilot"
+        )
+    if args.output_dir is None:
+        args.output_dir = ROOT / "results/figures" / (
+            "mag_tanh_reconstruction_8conv3d" if args.architecture == "8conv3d"
+            else "mag_tanh_reconstruction"
+        )
 
-    old = load_training_module()
+    old = load_training_module(TRAIN_SCRIPTS[args.architecture])
     catalog = old.read_catalog(ROOT / "data/splits/cv4_monthly_manifest.csv")
     cached = old.locate_mag_cache(ROOT / "data/cache/mag_events", catalog)
     val = [row for row in catalog
@@ -85,7 +99,7 @@ def main():
 
     t, observed_mag = clip
     # La orientacion y tau son EXACTAMENTE los usados al construir
-    # las etiquetas positivas durante el entrenamiento de 5o.
+    # las etiquetas positivas durante el entrenamiento del modelo elegido.
     direction = 1. if row["bs_time"] < event_time else -1.
     adaptive_tau, reliable = old.estimate_adaptive_tau(block, event_time)
     targets = {
@@ -110,7 +124,9 @@ def main():
         if not checkpoint.is_file():
             raise FileNotFoundError(f"No existe el checkpoint {checkpoint}")
         ck = torch.load(checkpoint, map_location="cpu", weights_only=False)
-        if ck.get("variant") != variant or ck.get("fold") != args.fold:
+        if (ck.get("variant") != variant or ck.get("fold") != args.fold or
+                (args.architecture == "8conv3d" and
+                 ck.get("architecture") != old.ARCHITECTURE)):
             raise ValueError(f"Checkpoint incompatible: {checkpoint}")
         model = old.MagTanhAE()
         model.load_state_dict(ck["state_dict"])
