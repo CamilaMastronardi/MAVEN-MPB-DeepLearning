@@ -8,7 +8,7 @@ if [[ -f .venv/bin/activate ]]; then
   source .venv/bin/activate
 fi
 
-OUTPUT_DIR="${OUTPUT_DIR:-results/metrics/swea_mag_joint_clusters_v13}"
+OUTPUT_DIR="${OUTPUT_DIR:-results/metrics/swea_mag_joint_clusters_v13_frames256}"
 MAG_LATENTS_CSV="${MAG_LATENTS_CSV:-results/metrics/mag_autoencoder_clusters_v13/crossing_latents_groups.csv}"
 MAG_CACHE_DIR="${MAG_CACHE_DIR:-data/cache/mag_events}"
 SWEA_CACHE_DIR="${SWEA_CACHE_DIR:-data/cache/swea_events}"
