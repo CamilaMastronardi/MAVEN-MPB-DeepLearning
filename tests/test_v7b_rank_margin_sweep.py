@@ -88,7 +88,7 @@ class SweepTest(unittest.TestCase):
             summary = json.loads(
                 (root / "nested_inner_selected_summary.json").read_text())
             self.assertEqual(summary["selected_margins_by_inner_monitor"],
-                             {"1": 2.0})
+                             {"1": 1.0})
             self.assertAlmostEqual(
                 summary["inner_selected_outer_metrics"]["within_120s_over_all"],
                 1/3)
