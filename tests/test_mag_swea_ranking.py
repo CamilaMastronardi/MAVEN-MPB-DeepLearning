@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 import unittest
+import csv
+import tempfile
+from importlib import import_module
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -162,6 +166,30 @@ class SeventhRankExperimentTests(unittest.TestCase):
         self.assertEqual(len({x[0] for x in batches[0]}), 1)
         with self.assertRaisesRegex(ValueError, "Batch size too small"):
             list(event_group_batches(events, batch_size=2))
+
+    def test_paired_plot_matches_utc_z_and_offset_spelling(self):
+        plot = import_module("scripts.7_figures.7a_plot_mag_swea_results")
+        with tempfile.TemporaryDirectory() as folder:
+            for subpath, when in [
+                ("old", "2020-01-01T00:00:00Z"),
+                ("rank", "2020-01-01T00:00:00+00:00"),
+            ]:
+                location = Path(folder)/subpath
+                location.mkdir()
+                with (location/"fold_01_event_metrics.csv").open(
+                    "w", newline="", encoding="utf-8"
+                ) as output:
+                    writer = csv.DictWriter(
+                        output,
+                        fieldnames=("mpb_timestamp_utc", "absolute_error_s")
+                    )
+                    writer.writeheader()
+                    writer.writerow({
+                        "mpb_timestamp_utc": when, "absolute_error_s": "20."
+                    })
+            old_events = plot.load_events(Path(folder)/"old")
+            rank_events = plot.load_events(Path(folder)/"rank")
+            self.assertEqual(old_events, rank_events)
 
     def test_hard_negative_memory_is_event_and_fold_local(self):
         groups = select_rank_event_groups(
