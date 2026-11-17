@@ -182,7 +182,9 @@ def load_event_blocks(rows, args):
                     max_rows=(args.max_mag_rows if sensor == "MAG"
                               else args.max_swea_rows)
                 )
-            if hit is None:
+            # Empty cached SWEA intervals are not treated as durable
+            # availability: BigQuery may receive those measurements later.
+            if hit is None or (sensor == "SWEA" and not len(hit[0])):
                 pending.append((row, sensor, start, end))
             else:
                 blocks[row["time"]][sensor] = hit
@@ -246,9 +248,16 @@ def load_event_blocks(rows, args):
         else:
             ts, values = energy_features(result)
         del result
-        caches[sensor].save(
-            row["time"], start, end, ts, values
-        )
+        if sensor != "SWEA" or len(ts):
+            caches[sensor].save(
+                row["time"], start, end, ts, values
+            )
+        else:
+            print(
+                f"SWEA absent for {row['time']}; not caching an empty "
+                "source interval, so it can be retried after data ingestion.",
+                flush=True
+            )
         blocks[row["time"]][sensor] = (ts, values)
         if i % 50 == 0 or i == len(plans):
             print(f"FETCHED {i}/{len(plans)} sensor blocks.", flush=True)
