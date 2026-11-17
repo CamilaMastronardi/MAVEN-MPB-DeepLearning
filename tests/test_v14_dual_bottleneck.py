@@ -1,7 +1,9 @@
 """Offline V14 tests: frozen V7b, 8-layer 3D MAG/SWEA, native time."""
 from __future__ import annotations
 
+import sys
 import unittest
+from unittest.mock import patch
 from importlib import import_module
 from types import SimpleNamespace
 
@@ -38,6 +40,20 @@ class V14Tests(unittest.TestCase):
             self.mag,self.mag_mask,self.mag_time,
             self.swea,self.swea_mask,self.swea_time
         )
+
+    def test_cli_supplies_every_v7b_cache_loader_setting(self):
+        # Regress the missing refresh_swea_cache Namespace attribute
+        # that previously crashed immediately after a successful preflight.
+        with patch.object(sys,"argv",["v14"]):
+            a=v14.parse_args()
+        required=(
+            "mag_cache_dir","swea_cache_dir",
+            "refresh_swea_cache","max_mag_rows","max_swea_rows",
+            "max_query_gib","max_total_gib","execute","output_dir"
+        )
+        for name in required:
+            self.assertTrue(hasattr(a,name),name)
+        self.assertIs(a.refresh_swea_cache,False)
 
     def test_eight_layers_and_scalar_latents(self):
         self.assertEqual(len(self.model.mag_ae.encoder_layers),8)
