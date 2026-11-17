@@ -35,7 +35,10 @@ def load_events(base):
     return result
 
 
-def compare_shared(fifth, seventh, out):
+def compare_shared(
+    fifth, seventh, out, *,
+    baseline_label="V5 MAG", candidate_label="V7 MAG+SWEA"
+):
     shared = sorted(set(fifth) & set(seventh))
     if not shared:
         raise ValueError("No paired MAG-only and MAG+SWEA events available.")
@@ -43,6 +46,8 @@ def compare_shared(fifth, seventh, out):
     y = np.asarray([seventh[k] for k in shared])
     report = {
         "paired_evaluable_events": len(shared),
+        "baseline_label": baseline_label,
+        "candidate_label": candidate_label,
         "fifth_only_events": len(set(fifth) - set(seventh)),
         "seventh_only_events": len(set(seventh) - set(fifth)),
         "fifth_paired_median_error_s": float(np.median(x)),
@@ -62,12 +67,12 @@ def compare_shared(fifth, seventh, out):
     max_min = max(30., float(np.max(np.r_[x, y])/60.))
     axs[0].scatter(x/60., y/60., s=10, alpha=.5)
     axs[0].plot([0, max_min], [0, max_min], "k--", lw=1)
-    axs[0].set(xlabel="V5 MAG-only: error absoluto (min)",
-               ylabel="V7 MAG+SWEA: error absoluto (min)",
+    axs[0].set(xlabel=f"{baseline_label}: error absoluto (min)",
+               ylabel=f"{candidate_label}: error absoluto (min)",
                title=f"Comparación de {len(shared)} MPB comunes",
                xlim=(0, max_min), ylim=(0, max_min))
     thresholds = np.linspace(0, max_min, 500)
-    for z, label in ((x, "V5 MAG"), (y, "V7 MAG+SWEA")):
+    for z, label in ((x, baseline_label), (y, candidate_label)):
         axs[1].plot(
             thresholds,
             np.searchsorted(np.sort(z/60.), thresholds, side="right")
@@ -96,6 +101,10 @@ def main():
     p.add_argument(
         "--compare-v5", type=Path,
         default=Path("results/metrics/mag_cv_residual_transition_v1")
+    )
+    p.add_argument(
+        "--compare-v7", type=Path, default=None,
+        help="Optional earlier V7 same-instrument baseline to compare with ranking."
     )
     args = p.parse_args()
     directory = args.results_dir
@@ -207,6 +216,26 @@ def main():
                 json.dumps(report, indent=2), encoding="utf-8"
             )
             print("Shared-event comparison:", report)
+    if args.compare_v7 is not None and args.compare_v7.exists():
+        previous_v7 = load_events(args.compare_v7)
+        if previous_v7:
+            report_v7 = compare_shared(
+                previous_v7, events,
+                figures/"mag_swea_v7_vs_v7b_shared.png",
+                baseline_label="V7 original MAG+SWEA",
+                candidate_label="V7b ranking MAG+SWEA",
+            )
+            # Historical compare_shared uses 'fifth/seventh' key names;
+            # remap for unambiguous saved V7-v7b statistics.
+            renamed = {
+                key.replace("fifth", "v7_original").replace(
+                    "seventh", "v7b_ranking"
+                ): value for key, value in report_v7.items()
+            }
+            (figures/"mag_swea_v7_vs_v7b_shared.json").write_text(
+                json.dumps(renamed, indent=2), encoding="utf-8"
+            )
+            print("V7-v7b paired comparison:", renamed)
     print(f"Saved all figures to {figures.resolve()}")
 
 
