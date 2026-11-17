@@ -249,8 +249,9 @@ def grouped_summary(records,prefix,group_key):
         key for row in records for key in row
         if key.startswith(prefix) and key not in (
             "mag_n_pre","mag_n_post","swea_n_pre","swea_n_post",
-            "mag_total_b_consistency_max_nt"
-        )
+            "mag_total_b_consistency_max_nt",
+            "mag_cluster","swea_cluster",
+        ) and not key.endswith("_9view_n")
     })
     for group in groups:
         subset=[row for row in records if row.get(group_key)==group]
@@ -273,15 +274,21 @@ def paired_correlations(rows,sensors=("MAG","SWEA")):
     correlations=[]
     for sensor in sensors:
         prefix=sensor.lower()+"_"
-        fields=sorted([
-            k for k in rows[0] if k.startswith(prefix)
-            and k not in (
-                "mag_n_pre","mag_n_post","swea_n_pre","swea_n_post",
-                "mag_total_b_consistency_max_nt",
-                "mag_cluster","swea_cluster"
-            )
+        # Physical features only: exclude encoder errors, pads, labels
+        # and any columns added as embedding-reproduction diagnostics.
+        excluded={
+            "mag_n_pre","mag_n_post","swea_n_pre","swea_n_post",
+            "mag_total_b_consistency_max_nt",
+            "mag_cluster","swea_cluster",
+        }
+        fields=sorted({
+            k for row in rows for k in row
+            if k.startswith(prefix) and k not in excluded
             and not k.startswith(prefix+"z")
-        ])
+            and not k.endswith("_reconstruction_mse")
+            and not k.endswith("_latent_spread")
+            and "_9view_" not in k
+        })
         targets=[f"{prefix}z{i}" for i in (1,2,3)]
         for split,subset in (
             ("fit",[r for r in rows if r["split"]=="fit"]),
@@ -399,9 +406,13 @@ def _plot_group_features(rows,folder):
                 x=[_float(r.get(feature)) for r in fit if r[gkey]==group]
                 x=np.asarray(x)
                 series.append(x[np.isfinite(x)])
-            if any(len(s)>0 for s in series):
-                ax.boxplot(series,tick_labels=[f"G{g}" for g in groups],
-                           showfliers=False)
+            available=[(g,x) for g,x in zip(groups,series) if len(x)>0]
+            if available:
+                ax.boxplot(
+                    [x for _,x in available],
+                    labels=[f"G{g}" for g,_ in available],
+                    showfliers=False
+                )
             ax.set_title(feature,fontsize=10)
             ax.grid(alpha=.2)
         fig.suptitle(f"{sensor}: rasgos medidos por grupo (FIT)")
