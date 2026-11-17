@@ -47,6 +47,16 @@ OUT=Path("results/metrics/mag_swea_refiner_v10")
 PRETRAINED=Path("results/metrics/mag_swea_regions_ranking_v1")
 CALIBRATION_ALPHAS=(0.,.25,.5,.75,1.)
 
+def calibration_alpha_grid(step):
+    """Inclusive 0..1 alpha grid, with no floating endpoint drift."""
+    if not np.isfinite(step) or step <= 0. or step > 1.:
+        raise ValueError("Alpha step must be in (0,1].")
+    n=round(1./step)
+    if abs(n*step-1.)>1e-8:
+        raise ValueError("Alpha step must divide 1 exactly.")
+    return tuple(round(j/n,10) for j in range(n+1))
+
+
 
 def parse_args():
     p=argparse.ArgumentParser(description=__doc__)
@@ -68,6 +78,9 @@ def parse_args():
     p.add_argument("--localization-weight",type=float,default=1.5)
     p.add_argument("--offset-weight",type=float,default=0.5)
     p.add_argument("--gaussian-sigma-s",type=float,default=32.)
+    p.add_argument("--calibration-goal",choices=("clipped_mae","within_60"),
+                   default="clipped_mae")
+    p.add_argument("--alpha-step",type=float,default=.25)
     p.add_argument("--train-positives-per-event",type=int,default=3)
     p.add_argument("--train-negatives-per-event",type=int,default=3)
     p.add_argument("--evaluation-stride-s",type=float,default=32.)
@@ -88,6 +101,10 @@ def parse_args():
     if (min(positive)<=0 or a.min_epochs>a.max_epochs
             or a.pilot_events_per_fold<0 or a.offset_weight<0):
         p.error("Invalid V10 configuration.")
+    try:
+        calibration_alpha_grid(a.alpha_step)
+    except ValueError as exc:
+        p.error(str(exc))
     return a
 
 
@@ -111,6 +128,12 @@ def signature(args,fold,checkpoint,fit,monitor,val):
         "eval_stride":args.evaluation_stride_s,
         "calibration_alphas":CALIBRATION_ALPHAS,
     }
+    # Preserve legacy V10/HP1 signatures exactly when using default calibration.
+    if (args.calibration_goal!="clipped_mae" or
+            abs(args.alpha_step-.25)>1e-10):
+        spec["calibration_goal"]=args.calibration_goal
+        spec["alpha_step"]=args.alpha_step
+        spec["calibration_alphas"]=calibration_alpha_grid(args.alpha_step)
     return hashlib.sha256(
         json.dumps(spec,sort_keys=True).encode()
     ).hexdigest()
@@ -303,7 +326,8 @@ def corrected_error(record,method,alpha):
     return abs(time),time
 
 
-def calibrate_refinement(refined):
+def calibrate_refinement(refined, *, goal="clipped_mae",
+                         alphas=CALIBRATION_ALPHAS):
     """Pick the mean/peak residual strength from INNER monitor ONLY.
 
     Always include alpha=0, the exact V7b baseline; tie-break toward
@@ -311,8 +335,12 @@ def calibrate_refinement(refined):
     """
     if not refined:
         raise RuntimeError("Cannot calibrate without inner-month proposals.")
+    if goal not in ("clipped_mae","within_60"):
+        raise ValueError("Invalid calibration goal.")
+    if not alphas or 0. not in alphas:
+        raise ValueError("Calibration grid must include alpha=0.")
     best=None
-    for alpha in CALIBRATION_ALPHAS:
+    for alpha in alphas:
         for method in ("mean","peak"):
             errors=np.asarray([
                 corrected_error(row,method,alpha)[0]
@@ -320,22 +348,24 @@ def calibrate_refinement(refined):
             ],dtype=float)
             # Optimize time localization on monitor; avoid outliers
             # dominating via 10-min winsorization and prefer modest alpha.
-            score=(
-                -float(np.mean(np.minimum(errors,600.))),
-                float(np.mean(errors<=60.)),
-                -float(np.median(errors)),
-                -alpha,
-                int(method=="mean"),
-            )
+            within_60=float(np.mean(errors<=60.))
+            clipped_mae=float(np.mean(np.minimum(errors,600.)))
+            median=float(np.median(errors))
+            if goal=="within_60":
+                score=(within_60,-clipped_mae,-median,
+                       -alpha,int(method=="mean"))
+            else:
+                # Legacy V10 / HP1 ordering; no change for past runs.
+                score=(-clipped_mae,within_60,-median,
+                       -alpha,int(method=="mean"))
             if best is None or score>best[0]:
                 best=(
                     score,{"alpha":float(alpha),"method":method,
                            "n_monitor_events":len(refined),
                            "monitor_median_error_s":float(np.median(errors)),
                            "monitor_within_60s":float(np.mean(errors<=60.)),
-                           "monitor_clipped_mae_s":float(np.mean(
-                               np.minimum(errors,600.)
-                           ))}
+                           "monitor_clipped_mae_s":clipped_mae,
+                           "calibration_goal":goal}
                 )
     return best[1]
 
@@ -538,7 +568,10 @@ def train_fold(fold,parts,blocks,all_rows,args,device):
     monitor_refined=refine_proposals(
         model,monitor_coarse,normalizers,args,device
     )
-    calibration=calibrate_refinement(monitor_refined)
+    calibration=calibrate_refinement(
+        monitor_refined,goal=args.calibration_goal,
+        alphas=calibration_alpha_grid(args.alpha_step)
+    )
     print(
         f"FOLD {fold}: INNER MONITOR selected refinement "
         f"method={calibration['method']} "
@@ -579,6 +612,8 @@ def train_fold(fold,parts,blocks,all_rows,args,device):
             "n_train_positive":args.train_positives_per_event,
             "n_train_negative":args.train_negatives_per_event,
             "evaluation_stride_s":args.evaluation_stride_s,
+            "calibration_goal":args.calibration_goal,
+            "alpha_step":args.alpha_step,
             "teacher_frozen":True
         },
         "evaluation_warning":(
