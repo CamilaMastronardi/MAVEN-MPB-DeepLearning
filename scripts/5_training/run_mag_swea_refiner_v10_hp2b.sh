@@ -60,11 +60,11 @@ echo "Cache MUST be complete; abort before BigQuery if it is not."
 python -m py_compile \
     src/detection/mpb_region_anchored_refiner.py \
     scripts/5_training/5f_train_mag_swea_refiner_v10.py \
-    scripts/5_training/5l_preflight_v10_hp2b_cache.py \
+    scripts/5_training/5l_preflight_v10_hp1_cache.py \
     tests/test_mag_swea_refiner_v10.py
 python -m unittest discover -s tests -p 'test_mag_swea_refiner_v10.py' -v
 
-python scripts/5_training/5l_preflight_v10_hp2b_cache.py \
+python scripts/5_training/5l_preflight_v10_hp1_cache.py \
     --manifest "$MANIFEST" \
     --mag-cache-dir "$MAG_CACHE_DIR" \
     --swea-cache-dir "$SWEA_CACHE_DIR" \
