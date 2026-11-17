@@ -239,7 +239,9 @@ def train_epoch(model,optimizer,pools,normalizers,args,device,epoch,fold):
         for k in ("det","time","total"):
             weighted[k]+=metrics[k]*len(items)
         seen+=len(items)
-    return {k:v/seen for k,v in weighted.items()}|{"n_examples":seen}
+    result={k:v/seen for k,v in weighted.items()}
+    result["n_examples"]=seen
+    return result
 
 
 @torch.no_grad()
@@ -261,7 +263,9 @@ def monitor_epoch(model,pools,normalizers,args,device):
         for key in ("det","time","total"):
             scores[key]+=metrics[key]*len(block)
         n+=len(block)
-    return {key:value/n for key,value in scores.items()}|{"n_examples":n}
+    result={key:value/n for key,value in scores.items()}
+    result["n_examples"]=n
+    return result
 
 
 @torch.no_grad()
@@ -675,7 +679,7 @@ def main():
         f"within60={summary['fraction_within_60s']:.1%} "
         f"V7b paired median={summary['paired_v7b_median_error_s']:.1f}s "
         f"within60={summary['paired_v7b_within_60s']:.1%} "
-        f"improved={summary['paired_improved']}/{len(done) and summary['n_evaluable_events']}.",
+        f"improved={summary['paired_improved']}/{summary['n_evaluable_events']}.",
         flush=True
     )
 
