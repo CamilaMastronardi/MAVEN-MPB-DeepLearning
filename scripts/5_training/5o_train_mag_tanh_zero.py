@@ -436,6 +436,26 @@ def save_centered_diagnostic(output: Path, row: dict, traces: dict):
     plt.close(fig)
 
 
+def heldout_centered_diagnostics(model, row: dict, block, norm: dict) -> dict:
+    """Held-out reconstruction only; catalog-centered for retrospective scoring.
+
+    This window is NOT used to select a coarse candidate or fit an MPB time.
+    """
+    clip = extract_window(block, row["time"])
+    if clip is None:
+        return {"centered_reconstruction_mse": None,
+                "centered_magnitude_consistency_rmse_nt": None}
+    t, observed = clip
+    _, predicted_standardized = predict_clip(model, clip, norm)
+    normalized_observed = (observed - norm["mean"])/norm["scale"]
+    rec_mse = float(np.mean((predicted_standardized-normalized_observed)**2))
+    physical = predicted_standardized*norm["scale"] + norm["mean"]
+    physical_module = np.linalg.norm(physical[:, :3], axis=1)
+    cons_rmse = float(np.sqrt(np.mean((physical[:, 3]-physical_module)**2)))
+    return {"centered_reconstruction_mse": rec_mse,
+            "centered_magnitude_consistency_rmse_nt": cons_rmse}
+
+
 def serialize_result(result, row, variant, fold):
     if result is None:
         return {"variant": variant, "fold": fold,
@@ -595,7 +615,11 @@ def main():
             for n, row in enumerate(splits["val"]):
                 result = search_event(model, row, blocks[row["time"]], norm,
                                       args.scan_stride, args.max_fits)
-                pred_rows.append(serialize_result(result, row, variant, fold))
+                entry = serialize_result(result, row, variant, fold)
+                entry.update(heldout_centered_diagnostics(
+                    model, row, blocks[row["time"]], norm
+                ))
+                pred_rows.append(entry)
                 if n < args.plot_events:
                     plot_results.setdefault(row["time"], {"row": row})[variant] = (result, norm)
                     centered_clip = extract_window(blocks[row["time"]], row["time"])
@@ -609,7 +633,14 @@ def main():
             write_csv(fold_out/f"fold_{fold:02d}_{variant}_events.csv", pred_rows)
             all_pred_rows += pred_rows
             errors = [r["abs_error_s"] for r in pred_rows if r["evaluated"]]
+            recvals = [r["centered_reconstruction_mse"] for r in pred_rows
+                       if r["centered_reconstruction_mse"] is not None]
+            consvals = [r["centered_magnitude_consistency_rmse_nt"] for r in pred_rows
+                        if r["centered_magnitude_consistency_rmse_nt"] is not None]
             report = {"fold": fold, "variant": variant,
+                      "val_centered_rec_n": len(recvals),
+                      "val_centered_rec_mse": float(np.mean(recvals)) if recvals else None,
+                      "val_centered_consistency_rmse_nt": float(np.mean(consvals)) if consvals else None,
                       "val_count": len(pred_rows), "evaluable": len(errors),
                       "evaluable_fraction": len(errors)/len(pred_rows),
                       "fraction_within_60s_over_all": sum(e <= 60 for e in errors)/len(pred_rows),
