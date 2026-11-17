@@ -439,6 +439,58 @@ def summarize_groups(rows,clustering):
     }
 
 
+def compare_clusters_to_v10(assigned,baseline_dir):
+    """Post-hoc group diagnostics; never used in AE or KMeans fit.
+
+    Old V10 errors are compared on identical catalog event timestamps.
+    Missing previous output is not an error for V13 exploratory grouping.
+    """
+    matched={}
+    for fold in (1,2,3,4):
+        path=baseline_dir/f"fold_{fold:02d}_event_metrics.csv"
+        if not path.is_file():
+            continue
+        with path.open(newline="",encoding="utf-8") as fp:
+            for row in csv.DictReader(fp):
+                try:
+                    matched[row["mpb_timestamp_utc"]]=float(
+                        row["absolute_error_s"]
+                    )
+                except (ValueError,KeyError):
+                    pass
+    by_cluster=defaultdict(list)
+    no_baseline=0
+    for row in assigned:
+        if row["cluster"]=="":
+            continue
+        err=matched.get(row["mpb_timestamp_utc"])
+        if err is None:
+            no_baseline+=1
+            continue
+        by_cluster[int(row["cluster"])].append(err)
+    return {
+        "reference_model":"V10, exact event timestamp matches",
+        "matched":sum(map(len,by_cluster.values())),
+        "without_v10_reference":no_baseline,
+        "groups":{
+            str(group):{
+                "n":len(err),
+                "median_v10_error_s":float(np.median(err)),
+                "v10_fraction_within_60s":float(np.mean(
+                    np.asarray(err)<=60.
+                )),
+                "v10_fraction_over_300s":float(np.mean(
+                    np.asarray(err)>300.
+                )),
+            } for group,err in sorted(by_cluster.items())
+        },
+        "caution":(
+            "Diagnostic after unsupervised grouping; do not use V10 error "
+            "or future localization quality as KMeans input."
+        )
+    }
+
+
 def main():
     a=get_args()
     torch.set_num_threads(a.torch_threads)
@@ -664,6 +716,9 @@ def main():
             "trained encoders without aligning their latent spaces."
         )
     }
+    summary["posthoc_v10_by_cluster"]=compare_clusters_to_v10(
+        results,Path("results/metrics/mag_swea_refiner_v10")
+    )
     v7.safe_json(
         a.output_dir/"discovery_summary.json",summary
     )
