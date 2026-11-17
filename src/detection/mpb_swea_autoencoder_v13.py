@@ -1,7 +1,7 @@
 """V13-SWEA: independent eight-convolution 3D bottleneck autoencoder.
 
 SWEA measured native-cadence spectra: 12 preprocessed energy channels
-and up to 32 real frames. No temporal interpolation; shorter clips are
+and up to 256 real frames. No temporal interpolation; shorter clips are
 masked and symmetrically padded. TRAIN SWEA normalizer only.
 """
 from __future__ import annotations
@@ -12,7 +12,7 @@ from torch.nn import functional as F
 
 from src.detection.mpb_cnn_autoencoder_v13 import autoencoder_loss
 
-LENGTH=32
+LENGTH=256
 CHANNELS=12
 LATENT=3
 
@@ -21,7 +21,7 @@ class SWEA3DAutoencoder(nn.Module):
     def __init__(self,dropout=.10):
         super().__init__()
         widths=(12,16,24,32,40,48,56,64,64)
-        strides=(2,2,2,2,1,1,1,1)
+        strides=(2,2,2,2,2,2,2,1)
         self.encoder_layers=nn.ModuleList([
             nn.Sequential(
                 nn.Conv1d(widths[i],widths[i+1],kernel_size=5,
@@ -29,11 +29,11 @@ class SWEA3DAutoencoder(nn.Module):
                 nn.GELU(),
             ) for i in range(8)
         ])
-        # 32 samples ->16->8->4->2->2->2->2->2.
+        # 256 frames ->128->64->32->16->8->4->2->2.
         self.to_latent=nn.Linear(64*2,LATENT)
         self.from_latent=nn.Linear(LATENT,64*2)
         dec_widths=(64,64,56,48,40,32,24,16,12)
-        self.decode_sizes=(2,2,2,2,4,8,16,32)
+        self.decode_sizes=(2,4,8,16,32,64,128,256)
         self.decoder_layers=nn.ModuleList([
             nn.Conv1d(dec_widths[i],dec_widths[i+1],5,padding=2)
             for i in range(8)
@@ -50,7 +50,7 @@ class SWEA3DAutoencoder(nn.Module):
     def encode(self,swea,mask):
         if (swea.ndim!=3 or swea.shape[1:]!=(CHANNELS,LENGTH)
                 or mask.shape!=(len(swea),LENGTH)):
-            raise ValueError("SWEA requires [B,12,32] and [B,32] mask.")
+            raise ValueError(f"SWEA requires [B,12,{LENGTH}] and [B,{LENGTH}] mask.")
         h=swea*mask[:,None,:].to(swea.dtype)
         for layer in self.encoder_layers:
             h=layer(h)
@@ -104,7 +104,9 @@ def swea_collate(examples,normalizer,device="cpu"):
         if (values.ndim!=2 or values.shape[1]!=CHANNELS
                 or not 12<=n<=LENGTH):
             raise ValueError(
-                f"Invalid measured SWEA window {tuple(values.shape)}"
+                f"Invalid measured SWEA window {tuple(values.shape)}; "
+                f"expected between 12 and {LENGTH} real frames "
+                "without truncation or interpolation"
             )
         start=(LENGTH-n)//2
         x[i,:,start:start+n]=((values-mu)/scale).T
