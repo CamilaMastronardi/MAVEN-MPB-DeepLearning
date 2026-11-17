@@ -161,7 +161,7 @@ results/metrics/swea_mag_joint_clusters_v13/
   coordenadas.
 - `discovery_summary.json`: métricas de reconstrucción/identificación
   SWEA, selección de K, silhouettes, ARI, matriz cruzada MAG/SWEA,
-  estabilidad entre folds y comparación posterior con V10.
+  distribución por folds, silhouette sobre el fold 4 y comparación posterior con V10.
 - `discovery_final.pt`: pesos SWEA y normalizador, centroides
   y parámetros de estandarización de los clusters y PCA.
 
