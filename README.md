@@ -2,7 +2,7 @@
 
 Trabajo final de **Machine Learning en Geofluidos** (UBA). La versión activa es **V7b**, un modelo convolucional de MAG+SWEA con supervisión débil de regiones y ranking de candidatos del mismo evento.
 
-Esta rama está dedicada a V7b. Los prototipos V9/V10/V14, los modelos MAG-only y las pruebas tanh fueron retirados del árbol, pero permanecen recuperables en el historial Git.
+La rama `main` está dedicada a V7b. Los prototipos V9/V10/V14, los modelos MAG-only y las pruebas tanh fueron retirados del árbol, pero permanecen recuperables en el historial Git.
 
 ## Organización
 
@@ -48,20 +48,21 @@ docs/
   04_hyperparameter_experiments.md
 ```
 
-## Uso (después de completar el entrenamiento antiguo)
+## Uso desde `main`
 
-**No cambiar a esta rama ni ejecutar `git pull` en WSL mientras haya una corrida activa iniciada con los archivos anteriores.** Cuando finalice y los resultados estén guardados:
+La reorganización V7b ya está integrada en **`main`**. Cuando no haya entrenamiento activo y los resultados estén guardados:
 
 ```bash
 cd ~/Codigos/MAVEN-MPB-DeepLearning
 git status
 git fetch origin
-git switch --track origin/v7b-clean-restructure
+git switch main
+git pull --ff-only origin main
 source .venv/bin/activate
 python -m unittest discover -s tests -v
 ```
 
-Si existen modificaciones locales, guardarlas o confirmarlas antes del cambio de rama. La rama `main` queda intacta hasta validar el refactor.
+Si aparecen modificaciones locales, guardarlas antes del cambio de rama (por ejemplo con `git stash push -u`). La rama temporal de reorganización ya no es necesaria para trabajar.
 
 Ejecutar el entrenamiento V7b con los hiperparámetros actuales:
 
@@ -77,7 +78,7 @@ Para el barrido en curso, con las mismas carpetas locales y reutilización de la
 bash scripts/03_experiments/03_run_region_weight.sh
 ```
 
-Los directorios `data/cache/` y `results/` se conservan localmente y permanecen ignorados por Git. **La rama nueva no borra ni cambia esos archivos al publicarse en GitHub.**
+Los directorios `data/cache/` y `results/` se conservan localmente y permanecen ignorados por Git. **Actualizar `main` no elimina esos archivos ignorados por Git.**
 
 ## Alcance físico
 
