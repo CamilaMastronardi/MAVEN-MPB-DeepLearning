@@ -135,13 +135,24 @@ def main():
     fig.savefig(figures/"mag_swea_cv_overview.png", dpi=190)
     plt.close(fig)
 
-    fig, axes = plt.subplots(3, 4, figsize=(15, 9),
-                             layout="constrained")
+    ranking_mode = bool(summary.get(
+        "training_configuration", {}
+    ).get("rank_weight", 0.))
     losses = [
         ("train_det", "val_det", "Transición MPB (BCE)"),
         ("train_region", "val_region", "Región plasmática (BCE)"),
         ("train_total", "val_total", "Pérdida total"),
     ]
+    if ranking_mode:
+        losses.extend([
+            ("train_rank", "val_rank", "Ranking mismo evento"),
+            ("train_event_top1", "val_event_top1",
+             "MPB supera controles: top-1"),
+        ])
+    fig, axes = plt.subplots(
+        len(losses), 4, figsize=(15, 3*len(losses)),
+        layout="constrained",
+    )
     for column, fold in enumerate(range(1, 5)):
         record = json.loads(
             (directory/f"fold_{fold:02d}_metrics.json").read_text()
@@ -155,10 +166,11 @@ def main():
             ax.axvline(record["best_epoch"], ls="--", color="gray")
             ax.set_title(f"Fold {fold}: {title}", fontsize=9)
             ax.grid(alpha=.2)
-        axes[2, column].set_xlabel("Época")
+        axes[-1, column].set_xlabel("Época")
     axes[0, 0].legend()
     fig.suptitle(
         "TRAIN vs monitor interno (meses TRAIN, no validación externa)"
+        + (" — ranking v7b" if ranking_mode else "")
     )
     fig.savefig(figures/"mag_swea_cv_losses.png", dpi=190)
     plt.close(fig)
