@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import tempfile
 import unittest
+from datetime import datetime,timezone
 from importlib import import_module
 from pathlib import Path
 
@@ -174,6 +175,45 @@ class StatisticsTests(unittest.TestCase):
             self.assertTrue(
                 (output/"swea_physical_group_boxplots.png").is_file()
             )
+
+    def test_example_figure_uses_iso_timestamp_not_manifest_time(self):
+        # The actual row comes from physical_features.csv and contains
+        # mpb_timestamp_utc, not datetime-valued row["time"].
+        t=datetime(2020,1,1,tzinfo=timezone.utc)
+        center=t.timestamp()
+        offsets=np.arange(-300.,301.,1.)
+        mag_t=center+offsets
+        b=np.zeros((len(offsets),4),dtype=np.float32)
+        b[:,0]=10.+np.sin(offsets/30.)
+        b[:,3]=np.abs(b[:,0])
+        swea_offsets=np.arange(-288.,289.,32.)
+        swea_t=center+swea_offsets
+        swea_flux=np.ones((len(swea_t),12),dtype=np.float32)
+        example={
+            "mpb_timestamp_utc":t.isoformat(),
+            "mag_cluster":1,
+            "swea_cluster":2,
+        }
+        path=[
+            {
+                "center_offset_s":float(shift),
+                "z1":float(shift/240.),
+                "z2":float(shift/480.),
+                "z3":0.,
+            }
+            for shift in (-120.,0.,120.)
+        ]
+        with tempfile.TemporaryDirectory() as temp:
+            folder=Path(temp)
+            script._plot_example(
+                example,
+                {"MAG":(mag_t,b),"SWEA":(swea_t,swea_flux)},
+                {"MAG":path,"SWEA":path},
+                folder
+            )
+            figures=list(folder.glob("*.png"))
+            self.assertEqual(len(figures),1)
+            self.assertGreater(figures[0].stat().st_size,1000)
 
     def test_original_embedding_matches_nine_shifted_views(self):
         track=[
