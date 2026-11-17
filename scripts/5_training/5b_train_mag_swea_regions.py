@@ -483,58 +483,123 @@ def batch_for_examples(examples, norm, device):
     )
 
 
-def train_epoch(model, optimizer, candidates, norm, args, device, epoch, fold):
-    selected = select_epoch_examples(
-        candidates, epoch, seed=args.seed + fold*10000
-    )
-    if not selected:
-        raise ValueError("No usable positive/control candidates in TRAIN.")
+def train_epoch(
+    model, optimizer, candidates, norm, args, device, epoch, fold,
+    *, hard_memory=None
+):
+    """V7 original BCE or V7b whole-event ranking with TRAIN-only mining."""
+    if args.rank_weight > 0:
+        if hard_memory is None:
+            raise ValueError("V7b requires a fold-local hard-negative memory.")
+        groups = select_rank_event_groups(
+            candidates, epoch=epoch, seed=args.seed + fold*10000,
+            hard_memory=hard_memory,
+            n_positives=args.rank_positives_per_event,
+            n_hard=args.rank_hard_negatives,
+            n_random=args.rank_random_negatives,
+        )
+        if not groups:
+            raise ValueError("No TRAIN events with both positive/negative clips.")
+        batches = event_group_batches(groups, args.batch_size)
+        n_examples = sum(len(items) for _, items in groups)
+    else:
+        selected = select_epoch_examples(
+            candidates, epoch, seed=args.seed + fold*10000
+        )
+        if not selected:
+            raise ValueError("No usable positive/control candidates in TRAIN.")
+        batches = (
+            selected[start:start+args.batch_size]
+            for start in range(0, len(selected), args.batch_size)
+        )
+        n_examples = len(selected)
+
     model.train()
     totals = defaultdict(float)
     steps = 0
-    for start in range(0, len(selected), args.batch_size):
-        batch = batch_for_examples(
-            selected[start:start+args.batch_size], norm, device
-        )
+    ranking_events = 0
+    for examples in batches:
+        batch = batch_for_examples(examples, norm, device)
         optimizer.zero_grad(set_to_none=True)
-        _, loss, log = classification_losses(model, batch, args)
+        out, loss, log = classification_losses(model, batch, args)
+        if args.rank_weight > 0:
+            rank, pair_accuracy, top1, n_events = (
+                event_pairwise_ranking_loss(
+                    out["transition_logit"],
+                    batch["transition"],
+                    [item[0].isoformat() for item in examples],
+                    margin=args.rank_margin,
+                )
+            )
+            loss = loss + args.rank_weight*rank
+            log["rank"] = float(rank.detach())
+            log["pair_accuracy"] = pair_accuracy
+            log["event_top1"] = top1
+            log["total"] = float(loss.detach())
+            ranking_events += n_events
         if not bool(torch.isfinite(loss)):
-            raise FloatingPointError("Nonfinite seventh loss.")
+            raise FloatingPointError("Nonfinite seventh/ranking loss.")
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
+        if args.rank_weight > 0:
+            # Never query MONITOR or outer validation to choose hard negatives.
+            update_hard_memory(
+                hard_memory, examples, out["transition_logit"],
+                n_hard=args.rank_hard_negatives,
+            )
         steps += 1
-        for k, v in log.items():
-            totals[k] += v
-    return {k: totals[k]/steps for k in totals} | {
-        "n_examples": len(selected)
-    }
+        for key, value in log.items():
+            totals[key] += value
+    result = {key: value/steps for key, value in totals.items()}
+    result["n_examples"] = n_examples
+    if args.rank_weight > 0:
+        result["rank_event_groups"] = ranking_events
+        result["hard_memory_events"] = len(hard_memory)
+    return result
 
 
 @torch.no_grad()
 def monitor_epoch(model, candidates, norm, args, device):
+    """Inner-month checkpoint monitor, including ranking when enabled."""
     entries = entries_from_candidates(candidates)
     if not entries:
         raise ValueError("No usable inner-monitor candidates.")
     model.eval()
     acc = defaultdict(float)
     detections, truths = [], []
+    ranking_entries = []
     total = 0
     for start in range(0, len(entries), args.batch_size):
         group = entries[start:start+args.batch_size]
         batch = batch_for_examples(group, norm, device)
         output, _, losses = classification_losses(model, batch, args)
+        logits = output["transition_logit"].cpu().numpy()
         scores = torch.sigmoid(
             output["transition_logit"]
         ).cpu().numpy()
         detections.extend(map(float, scores))
         truths.extend(item[3] for item in group)
+        if args.rank_weight > 0:
+            ranking_entries.extend(
+                (item[0].isoformat(), item[3], float(logit))
+                for item, logit in zip(group, logits)
+            )
         total += len(group)
         for key, val in losses.items():
             acc[key] += val * len(group)
-    metrics = {key: val/total for key, val in acc.items()}
-    # Model-selection objective is entirely on inner TRAIN-month monitor.
-    metrics["select_loss"] = metrics["det"] + args.region_weight*metrics["region"]
+    metrics = {key: value/total for key, value in acc.items()}
+    # All selection parameters are fitted strictly within outer TRAIN months.
+    metrics["select_loss"] = (
+        metrics["det"] + args.region_weight*metrics["region"]
+    )
+    if args.rank_weight > 0:
+        extra = numpy_event_rank_metrics(
+            ranking_entries, margin=args.rank_margin
+        )
+        metrics.update(extra)
+        metrics["select_loss"] += args.rank_weight*extra["rank"]
+        metrics["total"] += args.rank_weight*extra["rank"]
     return metrics, np.asarray(detections), np.asarray(truths)
 
 
