@@ -497,7 +497,9 @@ def train_fold(fold,selection,blocks,all_rows,args,device):
     )
     source_sha=hashlib.sha256(
         (v7.sha256_file(path7)+v7.sha256_file(args.manifest)+
-         str(args.evaluation_stride_s)).encode()
+         v7.sha256_file(
+             ROOT/"src/detection/mpb_listwise_reranker_v11.py"
+         )+str(args.evaluation_stride_s)).encode()
     ).hexdigest()
     teacher=MagSweaRegionAutoencoder().to(device)
     teacher.load_state_dict(v7state["model"])
@@ -514,6 +516,34 @@ def train_fold(fold,selection,blocks,all_rows,args,device):
         device,all_mpb,all_bs,source_sha
     )
     del teacher
+    # Ensure alpha=0 truly reproduces the original V7b candidate.
+    # This checks the full scan grid, normalization and sigmoid tie order.
+    original_v7b=v10.load_v7b_reference(
+        args.v7b_dir/f"fold_{fold:02d}_event_metrics.csv"
+    )
+    for row in val:
+        rec=records.get(row["time"])
+        if rec is None:
+            raise RuntimeError(
+                f"Cannot verify missing external scan {row['time']}."
+            )
+        baseline=original_v7b.get(row["time"].isoformat())
+        if baseline is None or baseline.get("peak_offset_s","")=="":
+            raise RuntimeError("V7b baseline event missing for V11.")
+        j=select_candidate(
+            rec["features"][:,0],rec["features"][:,0],alpha=0.
+        )
+        if abs(
+            float(rec["offsets"][j])-
+            float(baseline["peak_offset_s"])
+        )>0.1:
+            raise RuntimeError(
+                f"V11 alpha=0 does not reproduce original V7b "
+                f"candidate for {row['time']}; "
+                f"new={rec['offsets'][j]} "
+                f"old={baseline['peak_offset_s']}. "
+                "Check feature cache and data preprocessing."
+            )
     norm_events=[
         records[r["time"]]["features"] for r in fit
         if r["time"] in records
