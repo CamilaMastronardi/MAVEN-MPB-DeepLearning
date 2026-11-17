@@ -201,3 +201,22 @@ La caché MAG previa se reutiliza. La caché SWEA nueva se guarda en
 externa condicionada a cruces etiquetados; el F1 de candidatos con etiquetas
 débiles no es F1 orbital. Más detalles en
 `docs/mag_swea_seventh_training.md`.
+
+### V7b: ranking de candidatos MPB por evento
+
+`scripts/5_training/run_mag_swea_regions_ranking_v7b.sh` activa
+`--rank-weight 1.0` en la misma arquitectura MAG+SWEA del v7, pero
+entrena a ordenar los cruces reales por encima de controles seguros del
+mismo evento, mezclando negativos difíciles de TRAIN y negativos aleatorios.
+El checkpoint se selecciona sobre meses internos de TRAIN sumando el
+error de ranking a las BCE. Resultados aparte:
+`results/metrics/mag_swea_regions_ranking_v1/`.
+
+Para un piloto comparado de 8 eventos por fold:
+
+```bash
+PILOT_EVENTS_PER_FOLD=8 OUTPUT_DIR=results/metrics/mag_swea_regions_ranking_pilot \
+  bash scripts/5_training/run_mag_swea_regions_ranking_v7b.sh
+```
+
+Detalles: `docs/mag_swea_seventh_ranking.md`.
