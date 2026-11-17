@@ -42,10 +42,10 @@ echo "Outputs: $OUTPUT_ROOT"
 echo "All margins use the same fit/monitor month partitions; checkpoints chosen on inner monitor."
 echo "Outer-fold errors are for reporting, never checkpoint selection."
 python -m py_compile \
-  scripts/5_training/5b_train_mag_swea_regions.py \
-  src/detection/mag_swea_region_model.py \
-  src/detection/mpb_event_ranking.py \
-  scripts/5_training/compare_v7b_rank_margin_sweep.py
+  scripts/02_training/01_train_v7b.py \
+  src/model/v7b.py \
+  src/model/ranking.py \
+  scripts/03_experiments/02_compare_rank_margin.py
 python -m unittest discover -s tests -q
 
 
@@ -122,7 +122,7 @@ for spec in '0.25:margin_0p25' '0.5:margin_0p5' '1:margin_1' '2:margin_2'; do
   echo "============================================================"
   echo "Training V7b rank margin $rank_margin, weight 2 in $out"
   echo "============================================================"
-  python -u scripts/5_training/5b_train_mag_swea_regions.py \
+  python -u scripts/02_training/01_train_v7b.py \
     --manifest "$MANIFEST" \
     --output-dir "$out" \
     --mag-cache-dir "$MAG_CACHE_DIR" \
@@ -152,5 +152,5 @@ done
 
 # Analyze *matched* event identifiers across margins; select each fold's margin
 # using ONLY its inner monitor top-1 ranking, never outer validation.
-python scripts/5_training/compare_v7b_rank_margin_sweep.py \
+python scripts/03_experiments/02_compare_rank_margin.py \
   --results-root "$OUTPUT_ROOT" --folds "$FOLDS"

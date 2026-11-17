@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "scripts/5_training/compare_v7b_region_weight_sweep.py"
+SCRIPT = ROOT / "scripts/03_experiments/03_compare_region_weight.py"
 
 
 def get_comparator():

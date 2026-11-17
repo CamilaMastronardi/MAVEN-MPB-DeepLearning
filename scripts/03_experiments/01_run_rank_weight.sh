@@ -42,10 +42,10 @@ echo "Outputs: $OUTPUT_ROOT"
 echo "All weights use the same fit/monitor month partitions; checkpoints chosen on inner monitor."
 echo "Outer-fold errors are for reporting, never checkpoint selection."
 python -m py_compile \
-  scripts/5_training/5b_train_mag_swea_regions.py \
-  src/detection/mag_swea_region_model.py \
-  src/detection/mpb_event_ranking.py \
-  scripts/5_training/compare_v7b_rank_weight_sweep.py
+  scripts/02_training/01_train_v7b.py \
+  src/model/v7b.py \
+  src/model/ranking.py \
+  scripts/03_experiments/01_compare_rank_weight.py
 python -m unittest discover -s tests -q
 
 # Sequential, not parallel: avoid duplicate BigQuery fetches and CPU contention.
@@ -59,7 +59,7 @@ for spec in '0.5:rank_0p5' '1:rank_1' '2:rank_2' '4:rank_4'; do
   echo "============================================================"
   echo "Training V7b rank weight $rank_weight in $out"
   echo "============================================================"
-  python -u scripts/5_training/5b_train_mag_swea_regions.py \
+  python -u scripts/02_training/01_train_v7b.py \
     --manifest "$MANIFEST" \
     --output-dir "$out" \
     --mag-cache-dir "$MAG_CACHE_DIR" \
@@ -89,5 +89,5 @@ done
 
 # Analyze *matched* event identifiers across weights; select each fold's weight
 # using ONLY its inner monitor top-1 ranking, never outer validation.
-python scripts/5_training/compare_v7b_rank_weight_sweep.py \
+python scripts/03_experiments/01_compare_rank_weight.py \
   --results-root "$OUTPUT_ROOT" --folds "$FOLDS"
