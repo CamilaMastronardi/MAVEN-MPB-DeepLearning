@@ -289,7 +289,7 @@ def paired_correlations(rows,sensors=("MAG","SWEA")):
             and not k.endswith("_latent_spread")
             and "_9view_" not in k
         })
-        targets=[f"{prefix}z{i}" for i in (1,2,3)]
+        targets=[f"{sensor.lower()}z{i}" for i in (1,2,3)]
         for split,subset in (
             ("fit",[r for r in rows if r["split"]=="fit"]),
             ("outer_holdout",[
