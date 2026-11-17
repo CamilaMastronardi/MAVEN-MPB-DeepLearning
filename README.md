@@ -424,3 +424,21 @@ bash scripts/5_training/run_mag_swea_regions_v7.sh
 
 Salida nueva: `results/metrics/mag_swea_regions_v1/`.
 Manual: `docs/mag_swea_seventh_training.md`.
+
+## Séptimo experimento v7b — ranking por evento y negativos difíciles
+
+Sobre el clasificador físico MAG+SWEA del v7 se incorporó una pérdida
+pairwise de ranking: los candidatos MPB deben obtener logits superiores a
+los controles físicamente seguros del **mismo evento**. Dos negativos
+difíciles registrados durante TRAIN se combinan con dos controles aleatorios
+por época; la selección del checkpoint incluye ranking en el monitor interno.
+
+La revisión usa la **misma arquitectura dual de encoders** que v7 y tiene
+resultados aislados, sin sobrescribir v7:
+
+```bash
+PILOT_EVENTS_PER_FOLD=8 OUTPUT_DIR=results/metrics/mag_swea_regions_ranking_pilot \
+  bash scripts/5_training/run_mag_swea_regions_ranking_v7b.sh
+```
+
+Guía metodológica: `docs/mag_swea_seventh_ranking.md`.
