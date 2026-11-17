@@ -45,7 +45,7 @@ from src.detection.mpb_swea_autoencoder_v13 import (
 )
 from sklearn.decomposition import PCA
 
-OUT=Path("results/metrics/swea_mag_joint_clusters_v13")
+OUT=Path("results/metrics/swea_mag_joint_clusters_v13_frames256")
 OFFSETS_FOR_EMBED=(-240.,-180.,-120.,-60.,0.,60.,120.,180.,240.)
 
 
