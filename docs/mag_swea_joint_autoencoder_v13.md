@@ -20,8 +20,8 @@ predicciones autónomas de los tiempos MPB.
 - Entrada: 12 canales espectrales preprocesados de SWEA a la
   **cadencia real del instrumento**, en ventanas de 10 minutos.
   No se reinterpola SWEA a los tiempos MAG.
-- Las ventanas con 12–32 frames medidos se rellenan de forma simétrica
-  hasta un tensor 12×32. La máscara evita penalizar posiciones
+- Las ventanas con 12–256 frames medidos se rellenan de forma simétrica
+  hasta un tensor 12×256. La máscara evita penalizar posiciones
   artificiales en la reconstrucción; los valores de esas posiciones
   son cero normalizado.
 - Estandarización SWEA por canal calculada con las épocas únicas del
@@ -45,6 +45,15 @@ misma lógica de ventanas físicamente seguras de V13 MAG.
 El conjunto de ventanas de extracción de latentes se define por
 las MPB **ya catalogadas**, que es aceptable para describir
 morfologías pero NO para inferir cruces no identificados.
+
+La versión inicial tenía un límite artificial de **32 frames**
+y falló al encontrar una ventana medida de **38 frames**. La revisión
+corrige ese límite sin descartar muestras ni interpolar datos: se
+admiten hasta **256 frames por ventana** y se ignora el relleno en
+la pérdida de reconstrucción. Se ajustaron las ocho capas del
+encoder/decoder al nuevo tamaño, manteniendo tres variables latentes.
+**Los checkpoints de 32 frames no son compatibles**; el directorio
+de salida ahora lleva el sufijo `_frames256` para evitar mezclarlos.
 
 ## Clustering: MAG vs SWEA vs combinación
 
@@ -116,7 +125,7 @@ git pull origin main
 source .venv/bin/activate
 
 PILOT_EVENTS_PER_FOLD=16 \
-OUTPUT_DIR=results/metrics/swea_mag_joint_clusters_v13_smoke \
+OUTPUT_DIR=results/metrics/swea_mag_joint_clusters_v13_frames256_smoke \
 bash scripts/5_training/run_swea_mag_joint_clusters_v13.sh
 ```
 
@@ -143,7 +152,7 @@ SWEA; no modifica checkpoints ni resultados anteriores de MAG.
 ## Salidas
 
 ```
-results/metrics/swea_mag_joint_clusters_v13/
+results/metrics/swea_mag_joint_clusters_v13_frames256/
   discovery_last.pt
   discovery_best.pt
   discovery_final.pt
@@ -169,7 +178,7 @@ Ver el resumen:
 
 ```bash
 python -m json.tool \
-  results/metrics/swea_mag_joint_clusters_v13/discovery_summary.json
+  results/metrics/swea_mag_joint_clusters_v13_frames256/discovery_summary.json
 ```
 
 ## Decisión científica posterior
