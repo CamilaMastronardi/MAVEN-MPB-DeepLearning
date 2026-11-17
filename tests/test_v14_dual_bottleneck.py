@@ -1,4 +1,4 @@
-"""Offline V14 tests: frozen V7b, 8-layer 3D MAG/SWEA, native time."""
+"""Offline V14 tests: frozen V7b, 8-layer 5D MAG/SWEA, native time."""
 from __future__ import annotations
 
 import sys
@@ -59,8 +59,13 @@ class V14Tests(unittest.TestCase):
         self.assertEqual(len(self.model.mag_ae.encoder_layers),8)
         self.assertEqual(len(self.model.swea_ae.encoder_layers),8)
         out=self.forward()
-        self.assertEqual(tuple(out["mag_latent"].shape),(2,3))
-        self.assertEqual(tuple(out["swea_latent"].shape),(2,3))
+        self.assertEqual(tuple(out["mag_latent"].shape),(2,5))
+        self.assertEqual(tuple(out["swea_latent"].shape),(2,5))
+        self.assertEqual(self.model.fusion[0].in_features,13)
+        self.assertEqual(tuple(self.model.mag_ae.decode(
+            out["mag_latent"]).shape),(2,4,640))
+        self.assertEqual(tuple(self.model.swea_ae.decode(
+            out["swea_latent"]).shape),(2,12,256))
         self.assertEqual(tuple(out["time_logits"].shape),(2,600))
         self.assertEqual(tuple(out["expected_offset_s"].shape),(2,))
         self.assertEqual(tuple(out["peak_offset_s"].shape),(2,))
@@ -91,7 +96,7 @@ class V14Tests(unittest.TestCase):
         self.assertFalse(any(p.requires_grad
                             for p in self.model.teacher.parameters()))
 
-    def test_both_3d_encoders_receive_gradient_not_teacher(self):
+    def test_both_5d_encoders_receive_gradient_not_teacher(self):
         out=self.forward()
         batch={
             "mag":self.mag,"mag_mask":self.mag_mask,
