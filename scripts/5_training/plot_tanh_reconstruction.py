@@ -28,6 +28,7 @@ ROOT = Path(__file__).resolve().parents[2]
 TRAIN_SCRIPTS = {
     "legacy": ROOT / "scripts/5_training/5o_train_mag_tanh_zero.py",
     "8conv3d": ROOT / "scripts/5_training/5q_train_mag_tanh_8conv_3d.py",
+    "16ch": ROOT / "scripts/5_training/5s_train_mag_tanh_8conv_16ch.py",
 }
 VARIANTS = ("fixed", "adaptive", "consistent")
 
@@ -44,7 +45,7 @@ def load_training_module(script):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--architecture", choices=("legacy", "8conv3d"), default="legacy")
+    parser.add_argument("--architecture", choices=("legacy", "8conv3d", "16ch"), default="legacy")
     parser.add_argument("--fold", type=int, choices=(1, 2, 3, 4), default=1)
     parser.add_argument("--event-index", type=int, default=0,
                         help="Indice (desde cero) de eventos del fold seleccionado")
@@ -65,13 +66,15 @@ def main():
     torch.set_num_threads(args.torch_threads)
     if args.checkpoints_dir is None:
         args.checkpoints_dir = ROOT / "results/metrics" / (
-            "mag_tanh_global_8conv_3d_class3_pilot" if args.architecture == "8conv3d"
-            else "mag_tanh_zero_pilot"
+            "mag_tanh_global_8conv_16ch_class3_pilot" if args.architecture == "16ch"
+            else ("mag_tanh_global_8conv_3d_class3_pilot" if args.architecture == "8conv3d"
+                  else "mag_tanh_zero_pilot")
         )
     if args.output_dir is None:
         args.output_dir = ROOT / "results/figures" / (
-            "mag_tanh_reconstruction_8conv3d" if args.architecture == "8conv3d"
-            else "mag_tanh_reconstruction"
+            "mag_tanh_reconstruction_16ch" if args.architecture == "16ch"
+            else ("mag_tanh_reconstruction_8conv3d" if args.architecture == "8conv3d"
+                  else "mag_tanh_reconstruction")
         )
 
     old = load_training_module(TRAIN_SCRIPTS[args.architecture])
@@ -125,7 +128,7 @@ def main():
             raise FileNotFoundError(f"No existe el checkpoint {checkpoint}")
         ck = torch.load(checkpoint, map_location="cpu", weights_only=False)
         if (ck.get("variant") != variant or ck.get("fold") != args.fold or
-                (args.architecture == "8conv3d" and
+                (args.architecture != "legacy" and
                  ck.get("architecture") != old.ARCHITECTURE)):
             raise ValueError(f"Checkpoint incompatible: {checkpoint}")
         model = old.MagTanhAE()
