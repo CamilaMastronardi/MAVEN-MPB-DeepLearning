@@ -79,7 +79,7 @@ def fit_unique_epochs(blocks, times, *, instrument):
     if len(x) < 2 or not np.isfinite(x).all():
         raise ValueError(f"Insufficient finite {instrument} TRAIN epochs.")
     mean = x.mean(axis=0)
-    variance = np.maximum(np.mean((x - mean).square(), axis=0), 0.)
+    variance = np.maximum(np.mean(np.square(x - mean), axis=0), 0.)
     scale = np.where(variance > 1e-12, np.sqrt(variance), 1.)
     return {"mean": mean, "scale": scale, "n_epochs": len(x)}
 
