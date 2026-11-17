@@ -1,8 +1,11 @@
 """Offline V14 tests: frozen V7b, 8-layer 5D MAG/SWEA, native time."""
 from __future__ import annotations
 
+import csv
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 from importlib import import_module
 from types import SimpleNamespace
@@ -54,6 +57,35 @@ class V14Tests(unittest.TestCase):
         for name in required:
             self.assertTrue(hasattr(a,name),name)
         self.assertIs(a.refresh_swea_cache,False)
+
+    def test_v14_reports_120_second_fraction(self):
+        # Shared V10 evaluator is also used by the V14 trainer.
+        v10=import_module("scripts.5_training.5f_train_mag_swea_refiner_v10")
+        with tempfile.TemporaryDirectory() as folder:
+            reference=Path(folder)/"v7b.csv"
+            with reference.open("w",newline="",encoding="utf-8") as stream:
+                writer=csv.DictWriter(stream,fieldnames=(
+                    "mpb_timestamp_utc","peak_offset_s","absolute_error_s"))
+                writer.writeheader()
+                writer.writerow({
+                    "mpb_timestamp_utc":"2020-01-01T00:00:00+00:00",
+                    "peak_offset_s":100.,"absolute_error_s":100.})
+                writer.writerow({
+                    "mpb_timestamp_utc":"2020-01-02T00:00:00+00:00",
+                    "peak_offset_s":140.,"absolute_error_s":140.})
+            records=[{
+                "mpb_timestamp_utc":f"2020-01-0{i}T00:00:00+00:00",
+                "source_group":"Group1",
+                "coarse_offset_s":offset,
+                "refined_mean_offset_s":0.,
+                "refined_peak_offset_s":0.,
+                "refiner_confidence":.5,
+                "n_scanned_windows":1,
+            } for i,offset in ((1,100.),(2,140.))]
+            metrics,_=v10.evaluate_fold(
+                records,{"alpha":0.,"method":"mean"},reference)
+            self.assertAlmostEqual(metrics["fraction_within_120s"],.5)
+            self.assertAlmostEqual(metrics["fraction_within_60s"],0.)
 
     def test_eight_layers_and_scalar_latents(self):
         self.assertEqual(len(self.model.mag_ae.encoder_layers),8)
