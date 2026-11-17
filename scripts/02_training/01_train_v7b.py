@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Seventh experiment: real MAVEN MAG+SWEA MPB plasma-regime classifier.
+"""V7b: localizacion de la MPB de Marte con MAG, SWEA y ranking de eventos.
 
 Two native-cadence sensor encoders, two auxiliary autoencoders, a region
 classification head and a binary MPB transition head. Weak labels come
@@ -21,7 +21,6 @@ import random
 import sys
 from collections import defaultdict
 from datetime import timedelta
-from importlib import import_module
 from pathlib import Path
 
 import numpy as np
@@ -32,26 +31,26 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-bq = import_module("scripts.1_bigquery.1c_bigquery_event_pilot")
-pilot = import_module("scripts.3_windowing.3b_bigquery_window_pilot")
-previous = import_module("scripts.5_training.5a_train_mag_cv")
+from src.preprocessing import bigquery_source as bq
+from src.preprocessing import catalog as pilot
+from src.preprocessing import cv_splits as previous
 
-from src.data.mag_event_cache import MagEventCache
-from src.data.swea_event_cache import (
+from src.preprocessing.mag_cache import MagEventCache
+from src.preprocessing.swea_cache import (
     SweaEventCache, ENERGY_EV, energy_features
 )
-from src.data.mpb_weak_regions import (
+from src.preprocessing.weak_regions import (
     candidate_training_grid, candidate_evaluation_grid,
     candidate_ranking_grid,
 )
-from src.detection.mpb_event_ranking import (
+from src.model.ranking import (
     event_pairwise_ranking_loss, numpy_event_rank_metrics,
     select_rank_event_groups, event_group_batches, update_hard_memory,
 )
-from src.data.mpb_dual_windows import (
+from src.preprocessing.native_windows import (
     extract_clip, fit_unique_epochs, collate_dual
 )
-from src.detection.mag_swea_region_model import (
+from src.model.v7b import (
     MagSweaRegionAutoencoder, masked_reconstruction_loss
 )
 
