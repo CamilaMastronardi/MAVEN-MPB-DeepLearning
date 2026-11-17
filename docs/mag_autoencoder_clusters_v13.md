@@ -137,13 +137,18 @@ no centrados en el catálogo.
 En las ventanas de monitor y también en el fold externo
 se informa:
 - MSE MAG en ventanas reales (escala normalizada);
-- BCE, ROC-AUC y PR-AUC para clasificación de presencia
-  de MPB dentro de una ventana;
+- BCE, ROC-AUC, PR-AUC, precision, recall y F1 (umbral 0,5)
+  para clasificación de presencia de MPB dentro de una ventana;
 - error mediano de desplazamiento temporal en las
   **ventanas positivas conocidas** y fracción <=60 s;
 - k seleccionado, silhouette TRAIN, tamaño de grupos;
 - distribución de grupos por fold, por Group1/2/3 del
-  catálogo y error de reconstrucción medio por grupo.
+  catálogo y error de reconstrucción medio por grupo;
+- **diagnóstico posterior a los clusters** con los errores V10,
+  mediana y proporción dentro de +/-60 s en cada grupo. Este
+  análisis no modifica el aprendizaje del autoencoder ni los
+  agrupamientos y nos permitirá decidir qué grupo necesita
+  un modelo temporal especializado.
 
 Estos porcentajes de ventana no deben compararse
 directamente con el 56,9 % de V12: V12 localizaba
