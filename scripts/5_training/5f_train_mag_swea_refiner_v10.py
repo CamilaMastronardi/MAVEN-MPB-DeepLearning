@@ -329,6 +329,7 @@ def calibrate_refinement(refined):
             if best is None or score>best[0]:
                 best=(
                     score,{"alpha":float(alpha),"method":method,
+                           "n_monitor_events":len(refined),
                            "monitor_median_error_s":float(np.median(errors)),
                            "monitor_within_60s":float(np.mean(errors<=60.)),
                            "monitor_clipped_mae_s":float(np.mean(
