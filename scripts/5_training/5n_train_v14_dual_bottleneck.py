@@ -91,8 +91,17 @@ def parse_args():
         v10.calibration_alpha_grid(a.alpha_step)
     except ValueError as exc:
         p.error(str(exc))
-    if a.output_dir.resolve()==a.pretrained_dir.resolve():
-        p.error("Never overwrite frozen V7b checkpoints.")
+    protected=[
+        a.pretrained_dir,
+        Path("results/metrics/mag_swea_refiner_v10"),
+        Path("results/metrics/mag_swea_refiner_v10_hp1"),
+        Path("results/metrics/mag_swea_refiner_v10_hp2a"),
+        Path("results/metrics/mag_swea_refiner_v10_hp2b"),
+        Path("results/metrics/mag_autoencoder_clusters_v13"),
+        Path("results/metrics/swea_mag_joint_clusters_v13_frames256"),
+    ]
+    if a.output_dir.resolve() in {p.resolve() for p in protected}:
+        p.error("V14 output cannot overwrite prior experiment checkpoints.")
     return a
 
 
@@ -100,6 +109,9 @@ def signature(a,fold,checkpoint,fit,monitor,val):
     files=[
         ROOT/"src/detection/mpb_v14_dual_bottleneck_refiner.py",
         ROOT/"scripts/5_training/5n_train_v14_dual_bottleneck.py",
+        ROOT/"src/detection/mpb_cnn_autoencoder_v13.py",
+        ROOT/"src/detection/mpb_swea_autoencoder_v13.py",
+        ROOT/"src/detection/mpb_region_anchored_refiner.py",
     ]
     spec={
         "architecture":V14DualBottleneckRefiner.ARCHITECTURE,
