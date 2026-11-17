@@ -132,3 +132,27 @@ def candidate_evaluation_grid(event, all_mpb_s, all_bs_s, *, step_s=32.):
             all_mpb_s=all_mpb_s, all_bs_s=all_bs_s
         ) for d in offsets
     ]
+
+
+def candidate_ranking_grid(event, all_mpb_s, all_bs_s, *, step_s=120.):
+    """Dense safe-control pool for same-event ranking and hard negatives.
+
+    Centers at +/-10..30 min with a sparse physical grid; controls must
+    pass EXACTLY the same MPB/BS/other-boundary exclusion checks as v7.
+    This is never a license to label unknown intervals as true negatives.
+    """
+    if step_s <= 0 or step_s > 600.:
+        raise ValueError("Ranking control stride must be in (0, 600] s.")
+    center = event["time"].timestamp()
+    negative_offsets = np.arange(600., 1800.01, step_s)
+    offsets = [-30., 0., 30.]
+    for distance in negative_offsets:
+        offsets.extend((-float(distance), float(distance)))
+    candidates = [
+        classify_candidate(
+            event, center + shift,
+            all_mpb_s=all_mpb_s, all_bs_s=all_bs_s
+        )
+        for shift in offsets
+    ]
+    return [c for c in candidates if c.transition is not None]
