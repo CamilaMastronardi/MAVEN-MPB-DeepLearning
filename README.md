@@ -9,9 +9,9 @@ Final project for **Machine Learning in Geofluids** (DCAO, Universidad de Buenos
 The original V10 localizer is the established four-fold reference. The new
 **V14** retains V10's frozen V7b candidate search, but trains **two new
 eight-layer convolutional autoencoders**, one for MAG and one for SWEA,
-with a **three-scalar latent bottleneck per instrument**. Both bottlenecks
+with a **five-scalar latent bottleneck per instrument**. Both bottlenecks
 are used by the temporal refiner and have reconstruction supervision.
-Their 3D embeddings are exported for physical interpretation.
+Their 5D embeddings are exported for physical interpretation (with PCA projections for plotting).
 
 V14 has **not yet been trained or validated**; do not substitute its
 metrics for the completed V10 results until the four folds finish.
@@ -19,7 +19,8 @@ Different folds have different latent axes and must be visualized
 separately. This is conditional localization in labeled MPB neighborhoods,
 not a demonstrated autonomous whole-orbit detector.
 
-- [V14 architecture, training and limitations](docs/v14_dual_3d_refiner.md)
+- [V14 5D architecture, training and limitations](docs/v14_dual_5d_refiner.md)
+- [Historical V14 3D pilot](docs/v14_dual_3d_refiner.md)
 - [Original V10 reference](docs/mag_swea_refiner_v10.md)
 - [V13 latent-physics exploratory analysis](docs/v13_latent_physics_trajectories.md)
 
