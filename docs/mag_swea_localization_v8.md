@@ -37,7 +37,7 @@ La nueva pérdida de cercanía es:
     )
 
 Se promedia primero por evento y se pondera por defecto 0.7. La pérdida
-completa mantiene BCE_MP B + 0.5*BCE_regiones +
+completa mantiene BCE_MPB + 0.5*BCE_regiones +
 0.15*(Recon_MAG+Recon_SWEA) + 1.0*ranking_lejano + 0.7*L_near.
 Los pesos son exploratorios; no están validados contra datos futuros.
 
