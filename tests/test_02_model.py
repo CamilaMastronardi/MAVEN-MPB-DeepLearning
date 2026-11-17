@@ -22,7 +22,9 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(tuple(out["swea_reconstruction"].shape), (batch, 12, 19))
 
     def test_event_ranking_gradients(self):
-        logits = torch.tensor([2., 0., 0., 2.], requires_grad=True)
+        # Event A ranks the positive above its control; event B ranks
+        # its control above the positive. Event-wise accuracy must be 50%.
+        logits = torch.tensor([2., 0., 2., 0.], requires_grad=True)
         labels = torch.tensor([1., 0., 0., 1.])
         loss, accuracy, top1, count = event_pairwise_ranking_loss(
             logits, labels, ["A", "A", "B", "B"], margin=0.25)
