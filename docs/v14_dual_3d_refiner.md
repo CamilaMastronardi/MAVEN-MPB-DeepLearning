@@ -1,4 +1,4 @@
-# V14 — Localización V10 con dos autoencoders CNN de ocho capas y latentes 3D
+> **Archivo histórico:** esta documentación corresponde al primer piloto V14 con latente de 3 dimensiones. La revisión vigente utiliza **5 dimensiones por sensor**, un lanzador separado y checkpoints independientes. Ver [V14 5D](v14_dual_5d_refiner.md). El antiguo lanzador 3D se retiró para evitar reanudaciones incompatibles.\n\n# V14 — Localización V10 con dos autoencoders CNN de ocho capas y latentes 3D
 
 ## Objetivo para la entrega de ML Geofluidos
 
