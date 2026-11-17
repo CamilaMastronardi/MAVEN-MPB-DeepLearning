@@ -1,4 +1,4 @@
-# Python
+# Python and local environments
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -9,30 +9,17 @@ venv/
 .env
 .ipynb_checkpoints/
 
-# Data and generated outputs
-data/raw/*
-data/processed/*
-# Local compressed MAG event cache; potentially large scientific datasets.
+# MAVEN measurements and derived local experiment outputs
+data/raw/
+data/processed/
 data/cache/
-data/labels/*
-!data/raw/.gitkeep
-!data/processed/.gitkeep
-!data/labels/.gitkeep
-# Curated, small MPB crossing annotations are deliberately versioned
-!data/labels/README.md
-!data/labels/group1.csv
-!data/labels/group2.csv
-!data/labels/group3.csv
-!data/labels/group4.csv
-!data/labels/mpb_crossings.csv
-models/*
-!models/.gitkeep
-results/figures/*
-results/metrics/*
-!results/figures/.gitkeep
-!results/metrics/.gitkeep
+models/
+results/
 
-# System and editor files
+# Curated labels and CV manifests in data/labels and data/splits ARE versioned.
+# Jupyter notebooks created for the final submission may be committed later.
+
+# OS and editors
 .DS_Store
 .vscode/
 .idea/

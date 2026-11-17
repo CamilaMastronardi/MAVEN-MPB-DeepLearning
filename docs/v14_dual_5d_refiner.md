@@ -131,5 +131,5 @@ La elección arquitectónica de 5D debe considerarse
 exploratoria y evaluarse con los mismos eventos que las
 otras versiones.
 
-El documento [histórico V14 3D](v14_dual_3d_refiner.md)
-se conserva para reproducibilidad.
+El piloto y la documentación histórica de V14 3D se retiraron de `main`
+para dejar solo la variante 5D. Pueden recuperarse del historial Git.
