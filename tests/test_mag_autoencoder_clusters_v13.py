@@ -125,8 +125,11 @@ class V13ArchitectureTests(unittest.TestCase):
 class V13ClusteringTests(unittest.TestCase):
     def test_cluster_fit_only_training_event_latents(self):
         rng=np.random.default_rng(13)
-        center1=rng.normal(loc=(-3.,0.,0.),scale=.15,size=(9,3))
-        center2=rng.normal(loc=(3.,0.,0.),scale=.15,size=(9,3))
+        # All three coordinates must carry the cluster signal.
+        # Otherwise z-score scaling inflates noise-only axes and makes
+        # a high 3D silhouette threshold mathematically inappropriate.
+        center1=rng.normal(loc=(-3.,-3.,-3.),scale=.15,size=(9,3))
+        center2=rng.normal(loc=(3.,3.,3.),scale=.15,size=(9,3))
         train=np.concatenate((center1,center2))
         rows=[]
         records={}
