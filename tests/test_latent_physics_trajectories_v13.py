@@ -147,6 +147,34 @@ class StatisticsTests(unittest.TestCase):
             self.assertTrue(np.isfinite(found[0]["rho"]))
             self.assertTrue(np.isfinite(found[0]["q_fit_bh"]))
 
+    def test_group_feature_boxplots_work_with_current_matplotlib(self):
+        # Reproduce real Matplotlib API behavior without relying on
+        # the removed boxplot(labels=...) argument.
+        with tempfile.TemporaryDirectory() as tmp:
+            output=Path(tmp)
+            rows=[]
+            for i in range(4):
+                rows.append({
+                    "split":"fit",
+                    "mag_cluster":1 if i<2 else 2,
+                    "swea_cluster":1 if i%2==0 else 2,
+                    "mag_abs_delta_b_nt":float(i+1),
+                    "mag_rotation_deg":float(20+i),
+                    "mag_post_std_b_nt":float(i+2),
+                    "mag_post_rms_db_nt":float(i+3),
+                    "swea_abs_spectral_delta_logflux":float(i+.1),
+                    "swea_delta_hardness_logdiff":float(i+.2),
+                    "swea_post_temporal_std_logflux":float(i+.3),
+                    "swea_delta_mean_logflux":float(i+.4),
+                })
+            script._plot_group_features(rows,output)
+            self.assertTrue(
+                (output/"mag_physical_group_boxplots.png").is_file()
+            )
+            self.assertTrue(
+                (output/"swea_physical_group_boxplots.png").is_file()
+            )
+
     def test_original_embedding_matches_nine_shifted_views(self):
         track=[
             {
