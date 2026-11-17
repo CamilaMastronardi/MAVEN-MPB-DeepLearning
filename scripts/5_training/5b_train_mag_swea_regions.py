@@ -902,6 +902,13 @@ def fold_training(fold, selected, blocks, args, all_rows, device):
             for key, value in normalizers.items()
         },
         "training_configuration": {
+            # Record the fixed hyperparameters for controlled weight sweeps.
+            "seed": args.seed,
+            "learning_rate": args.learning_rate,
+            "batch_size": args.batch_size,
+            "max_epochs": args.max_epochs,
+            "evaluation_stride_s": args.evaluation_stride_s,
+            "manifest_sha256": sha256_file(args.manifest),
             "early_stop_min_epochs": args.min_epochs,
             "early_stop_patience": args.patience,
             "region_weight": args.region_weight,
@@ -1049,6 +1056,11 @@ def main():
             "NOT full orbit precision/recall."
         ),
         "training_configuration": {
+            "seed": args.seed,
+            "learning_rate": args.learning_rate,
+            "batch_size": args.batch_size,
+            "max_epochs": args.max_epochs,
+            "manifest_sha256": sha256_file(args.manifest),
             "source": "BigQuery MAVEN MAG + SWEA svy3d",
             "swea_fixed_energy_ev": ENERGY_EV.tolist(),
             "evaluation_stride_s": args.evaluation_stride_s,
