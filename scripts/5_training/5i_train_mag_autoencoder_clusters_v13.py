@@ -53,6 +53,7 @@ previous=import_module("scripts.5_training.5a_train_mag_cv")
 bq=import_module("scripts.1_bigquery.1c_bigquery_event_pilot")
 
 from src.data.mpb_dual_windows import extract_clip,fit_unique_epochs
+from src.data.mpb_weak_regions import classify_candidate
 from src.detection.mpb_cnn_autoencoder_v13 import (
     Conv3DAutoencoder,mag_collate,autoencoder_loss
 )
@@ -231,7 +232,9 @@ def monitor_epoch(model,pools,norm,a,device):
 
 
 @torch.no_grad()
-def event_embedding(model,row,blocks,norm,device,batch_size):
+def event_embedding(
+    model,row,blocks,norm,device,batch_size,mpb_s,bs_s
+):
     """Aggregate shifted positive views; labels used ONLY to define views.
 
     Clusters are descriptive, not directly deployable before MPB is known.
@@ -241,7 +244,13 @@ def event_embedding(model,row,blocks,norm,device,batch_size):
     center=row["time"].timestamp()
     examples=[]
     for delta in OFFSETS_FOR_EMBED:
-        clip=extract_clip(mag,swea,center+delta)
+        candidate=classify_candidate(
+            row,center+delta,all_mpb_s=mpb_s,all_bs_s=bs_s
+        )
+        # Exclude windows confounded by other catalog boundaries.
+        if candidate.kind not in ("positive","mpb_ambiguous"):
+            continue
+        clip=extract_clip(mag,swea,candidate.center_s)
         if clip is not None:
             examples.append((clip,1,-delta))
     if not examples:
@@ -580,7 +589,8 @@ def main():
     embeddings={}
     for i,row in enumerate(selected,1):
         info=event_embedding(
-            model,row,blocks,mag_norm,device,a.batch_size
+            model,row,blocks,mag_norm,device,a.batch_size,
+            mpb_s,bs_s
         )
         if info is not None:
             embeddings[row["time"]]=info
