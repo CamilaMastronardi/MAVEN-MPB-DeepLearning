@@ -728,10 +728,14 @@ def fold_training(fold, selected, blocks, args, all_rows, device):
         [r["bs_time"].timestamp() for r in all_rows], dtype=np.float64
     )
     fit_pool, fit_skip = gather_candidates(
-        fit, blocks, all_mpb_s, all_bs_s
+        fit, blocks, all_mpb_s, all_bs_s,
+        ranking=(args.rank_weight > 0),
+        rank_control_step_s=args.rank_control_step_s,
     )
     monitor_pool, monitor_skip = gather_candidates(
-        monitor, blocks, all_mpb_s, all_bs_s
+        monitor, blocks, all_mpb_s, all_bs_s,
+        ranking=(args.rank_weight > 0),
+        rank_control_step_s=args.rank_control_step_s,
     )
     val_pool, val_skip = gather_candidates(
         val, blocks, all_mpb_s, all_bs_s,
@@ -757,6 +761,7 @@ def fold_training(fold, selected, blocks, args, all_rows, device):
     start_epoch, best_epoch, stale = 0, 0, 0
     best_loss = float("inf")
     history = []
+    hard_memory = {}   # fold-local, TRAIN-only, restored for exact resume
     if last_file.exists():
         if not args.resume:
             raise RuntimeError(
@@ -774,6 +779,9 @@ def fold_training(fold, selected, blocks, args, all_rows, device):
         best_loss = float(state["best_loss"])
         stale = int(state["stale"])
         history = state["history"]
+        hard_memory = state.get("hard_memory", {})
+        if args.rank_weight > 0 and "hard_memory" not in state:
+            raise RuntimeError("Ranking checkpoint lacks mining state.")
         print(f"FOLD {fold}: resumed from epoch {start_epoch}.", flush=True)
 
     for epoch in range(start_epoch+1, args.max_epochs+1):
@@ -781,7 +789,7 @@ def fold_training(fold, selected, blocks, args, all_rows, device):
             break
         tr = train_epoch(
             model, optimizer, fit_pool, normalizers, args, device,
-            epoch, fold
+            epoch, fold, hard_memory=hard_memory,
         )
         mon, _, _ = monitor_epoch(
             model, monitor_pool, normalizers, args, device
@@ -804,12 +812,19 @@ def fold_training(fold, selected, blocks, args, all_rows, device):
             "train_swea_rec": tr["swea_rec"],
             "train_total": tr["total"],
             "train_n": tr["n_examples"],
+            "train_rank": tr.get("rank"),
+            "train_pair_accuracy": tr.get("pair_accuracy"),
+            "train_event_top1": tr.get("event_top1"),
             "val_det": mon["det"],
             "val_region": mon["region"],
             "val_mag_rec": mon["mag_rec"],
             "val_swea_rec": mon["swea_rec"],
             "val_total": mon["total"],
             "val_select": mon["select_loss"],
+            "val_rank": mon.get("rank"),
+            "val_pair_accuracy": mon.get("pair_accuracy"),
+            "val_event_top1": mon.get("event_top1"),
+            "val_rank_events": mon.get("n_rank_events"),
             "best_epoch": best_epoch, "stale": stale,
         })
         safe_checkpoint(last_file, {
@@ -819,12 +834,20 @@ def fold_training(fold, selected, blocks, args, all_rows, device):
             "history": history,
             "best_epoch": best_epoch,
             "best_loss": best_loss, "stale": stale,
+            "hard_memory": hard_memory,
         })
+        rank_log = (
+            f" train_rank={tr['rank']:.4f} "
+            f"val_rank={mon['rank']:.4f} "
+            f"val_top1={mon['event_top1']:.3f}"
+            if args.rank_weight > 0 else ""
+        )
         print(
             f"FOLD {fold} EPOCH {epoch}: train_det={tr['det']:.4f} "
             f"train_region={tr['region']:.4f} "
             f"val_det={mon['det']:.4f} "
-            f"val_region={mon['region']:.4f} "
+            f"val_region={mon['region']:.4f}"
+            f"{rank_log} "
             f"val_select={mon['select_loss']:.4f} "
             f"best={best_epoch} stale={stale}", flush=True
         )
@@ -852,12 +875,19 @@ def fold_training(fold, selected, blocks, args, all_rows, device):
         model, val_pool, normalizers, args, device, threshold, val
     )
     result = {
-        "schema": 1, "architecture": "dual-mag-swea-weak-regions-v1",
+        "schema": 1, "architecture": (
+            "dual-mag-swea-event-ranking-v1"
+            if args.rank_weight > 0 else "dual-mag-swea-weak-regions-v1"
+        ),
         "fold": fold, "signature": signature,
         "best_epoch": best_epoch, "epochs_completed": len(history),
         "monitor_best_loss": best_loss,
         "monitor_threshold": threshold,
         "monitor_weak_candidate_f1": monitor_f1,
+        "monitor_event_rank_loss": monitor_metrics.get("rank"),
+        "monitor_event_top1_fraction": monitor_metrics.get("event_top1"),
+        "monitor_event_pair_accuracy": monitor_metrics.get("pair_accuracy"),
+        "monitor_ranking_event_count": monitor_metrics.get("n_rank_events"),
         "train_events": len(fit), "inner_monitor_events": len(monitor),
         "excluded_train_support_overlaps": removed,
         "train_candidate_events": len(fit_pool),
@@ -876,6 +906,13 @@ def fold_training(fold, selected, blocks, args, all_rows, device):
             "early_stop_patience": args.patience,
             "region_weight": args.region_weight,
             "reconstruction_weight": args.reconstruction_weight,
+            "rank_weight": args.rank_weight,
+            "rank_margin": args.rank_margin,
+            "rank_control_step_s": args.rank_control_step_s,
+            "rank_positives_per_event": args.rank_positives_per_event,
+            "rank_hard_negatives": args.rank_hard_negatives,
+            "rank_random_negatives": args.rank_random_negatives,
+            "ranking_hard_memory_events": len(hard_memory),
             "swea_energy_ev": ENERGY_EV.tolist(),
             "mag_swea_native_time_grid": True,
         },
@@ -963,8 +1000,11 @@ def main():
             expected_signature = make_signature(
                 args, fold, fit, inner, parts["val"]
             )
-            if (saved.get("architecture") !=
-                    "dual-mag-swea-weak-regions-v1"
+            expected_architecture = (
+                "dual-mag-swea-event-ranking-v1"
+                if args.rank_weight > 0 else "dual-mag-swea-weak-regions-v1"
+            )
+            if (saved.get("architecture") != expected_architecture
                     or saved.get("signature") != expected_signature):
                 raise ValueError(
                     "Completed fold configuration/manifest mismatch; "
@@ -992,7 +1032,10 @@ def main():
         return
     summary = {
         "schema": 1, "instrument": "MAG+SWEA",
-        "architecture": "dual-mag-swea-weak-regions-v1",
+        "architecture": (
+            "dual-mag-swea-event-ranking-v1"
+            if args.rank_weight > 0 else "dual-mag-swea-weak-regions-v1"
+        ),
         "completed_folds": sorted(completed),
         "requested_folds": all_requested,
         "pilot_subset": bool(args.pilot_events_per_fold),
@@ -1011,6 +1054,12 @@ def main():
             "evaluation_stride_s": args.evaluation_stride_s,
             "reconstruction_weight": args.reconstruction_weight,
             "region_weight": args.region_weight,
+            "rank_weight": args.rank_weight,
+            "rank_margin": args.rank_margin,
+            "rank_control_step_s": args.rank_control_step_s,
+            "rank_positives_per_event": args.rank_positives_per_event,
+            "rank_hard_negatives": args.rank_hard_negatives,
+            "rank_random_negatives": args.rank_random_negatives,
             "epochs_min": args.min_epochs,
             "patience": args.patience,
         },
@@ -1020,7 +1069,9 @@ def main():
                 "val_evaluable_events", "median_abs_peak_error_s",
                 "fraction_within_60s", "candidate_weak_precision",
                 "candidate_weak_recall", "candidate_weak_f1",
-                "weak_region_accuracy"
+                "weak_region_accuracy", "monitor_event_rank_loss",
+                "monitor_event_top1_fraction",
+                "monitor_ranking_event_count"
             )} for fold in sorted(completed)
         ]
     }
