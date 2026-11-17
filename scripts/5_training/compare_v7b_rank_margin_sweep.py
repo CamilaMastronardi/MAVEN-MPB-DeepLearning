@@ -4,7 +4,7 @@
 Checkpoint selection was already done within each run on its INNER-month
 monitor. Hyperparameter selection here is based ONLY on inner-monitor
 ranking top-1 accuracy (tie: pair accuracy, smaller margin).
-Outer-fold metrics remain exploratory for individual weights; the per-fold
+Outer-fold metrics remain exploratory for individual margins; the per-fold
 inner-selected combination is the nested-evaluation result.
 
 No BigQuery, PyTorch, network access, or source data are read.
@@ -169,7 +169,7 @@ def main() -> None:
 
     configurations, runs = {}, {}
     for margin, folder in MARGINS:
-        configurations[margin], runs[margin] = load_weight_dir(
+        configurations[margin], runs[margin] = load_margin_dir(
             args.results_root, margin, folder, folds)
 
     # Compare only runs with identical manifest/splits, controlled parameters
@@ -235,7 +235,7 @@ def main() -> None:
         common_evaluable[fold] = set(ids)
         for event in ref_ids:
             record = {"fold": fold, "mpb_timestamp_utc": event,
-                      "evaluable_all_weights": event in common_evaluable[fold]}
+                      "evaluable_all_margins": event in common_evaluable[fold]}
             for margin, folder in MARGINS:
                 record[f"{folder}_error_s"] = (
                     runs[margin][fold]["events"][event]["abs_error_s"])
