@@ -1,7 +1,7 @@
 """Chequeos de reproducibilidad de la division FIT/MONITOR de V7b."""
 from __future__ import annotations
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from src.preprocessing.cv_splits import check_disjoint_supports, split_inner_monitor_months
 
 def event(month, day=15):
@@ -21,8 +21,14 @@ class PreprocessingTests(unittest.TestCase):
         check_disjoint_supports(fit, monitor)
 
     def test_reject_overlapping_context(self):
+        # Each event uses +/-35 min of measurements. Centers 60 min apart
+        # have overlapping physical support; centers 71 min apart do not.
+        train = event(1, 15)
+        near = {**train, "time": train["time"] + timedelta(minutes=60)}
+        far = {**train, "time": train["time"] + timedelta(minutes=71)}
         with self.assertRaises(ValueError):
-            check_disjoint_supports([event(1, 15)], [event(1, 16)])
+            check_disjoint_supports([train], [near])
+        check_disjoint_supports([train], [far])
 
 if __name__ == "__main__":
     unittest.main()
