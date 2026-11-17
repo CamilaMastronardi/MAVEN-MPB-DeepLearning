@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""V14: V10 conditional MPB refinement with eight-convolution 3D AEs.
+"""V14: V10 conditional MPB refinement with eight-convolution 5D AEs.
 
 A frozen matching-fold V7b model proposes the coarse event time.
 Two NEW 8-layer convolutional encoders compress measured MAG and SWEA
-windows independently to THREE scalar latent coordinates each; their
+windows independently to FIVE scalar latent coordinates each; their
 decoders reconstruct the observations. The fine time head ONLY sees
-the two 3D codes and the frozen V7b coarse/region scores.
+the two 5D codes and the frozen V7b coarse/region scores.
 
 Fold-safe, monitored, resumable CPU training. Produces OUTER event
-errors AND 3D embeddings without BigQuery if source caches are complete.
+errors AND 5D embeddings without BigQuery if source caches are complete.
 """
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ bq=import_module("scripts.1_bigquery.1c_bigquery_event_pilot")
 from src.data.mpb_dual_windows import collate_dual, extract_clip
 from src.detection.mpb_v14_dual_bottleneck_refiner import V14DualBottleneckRefiner
 
-OUT=Path("results/metrics/v14_dual_3d_refiner")
+OUT=Path("results/metrics/v14_dual_5d_refiner")
 METRIC_KEYS=("bce","temporal_kl","offset","reconstruction_mag",
              "reconstruction_swea","total")
 
@@ -102,6 +102,8 @@ def parse_args():
         Path("results/metrics/mag_swea_refiner_v10_hp2b"),
         Path("results/metrics/mag_autoencoder_clusters_v13"),
         Path("results/metrics/swea_mag_joint_clusters_v13_frames256"),
+        Path("results/metrics/v14_dual_3d_refiner"),
+        Path("results/metrics/v14_dual_3d_refiner_pilot"),
     ]
     if a.output_dir.resolve() in {p.resolve() for p in protected}:
         p.error("V14 output cannot overwrite prior experiment checkpoints.")
@@ -112,8 +114,6 @@ def signature(a,fold,checkpoint,fit,monitor,val):
     files=[
         ROOT/"src/detection/mpb_v14_dual_bottleneck_refiner.py",
         ROOT/"scripts/5_training/5n_train_v14_dual_bottleneck.py",
-        ROOT/"src/detection/mpb_cnn_autoencoder_v13.py",
-        ROOT/"src/detection/mpb_swea_autoencoder_v13.py",
         ROOT/"src/detection/mpb_region_anchored_refiner.py",
     ]
     spec={
@@ -251,8 +251,10 @@ def export_outer_latents(model,val,blocks,normalizers,event_rows,
                     "view":view,
                     "center_offset_s":delta,
                     "absolute_error_s":float(pred["absolute_error_s"]),
-                    "mag_z1":zm[0],"mag_z2":zm[1],"mag_z3":zm[2],
-                    "swea_z1":zs[0],"swea_z2":zs[1],"swea_z3":zs[2],
+                    **{f"mag_z{i+1}":value
+                       for i,value in enumerate(zm)},
+                    **{f"swea_z{i+1}":value
+                       for i,value in enumerate(zs)},
                     "mag_samples":len(clip.mag),
                     "swea_frames":len(clip.swea),
                 })
@@ -400,7 +402,7 @@ def train_fold(fold,parts,blocks,rows,a,device):
         "best_epoch":best_epoch,"epochs_completed":len(history),
         "train_history":history,
         "monitor_calibration":calibration,
-        "latent_dimensions":{"MAG":3,"SWEA":3},
+        "latent_dimensions":{"MAG":5,"SWEA":5},
         "encoder_conv_layers":{"MAG":8,"SWEA":8},
         "latent_export_rows":n_latent,
         "latent_export_skipped_views":n_skips,
@@ -414,7 +416,7 @@ def train_fold(fold,parts,blocks,rows,a,device):
         )},
         "limitations":(
             "Conditional MPB localization within catalog-defined +/-30min. "
-            "3D embeddings use observed data only. Catalog-centered exported "
+            "5D embeddings use observed data only. Catalog-centered exported "
             "views use true MPB labels for retrospective analysis, never "
             "for inference. No orbital autonomous F1."
         ),
@@ -429,7 +431,7 @@ def train_fold(fold,parts,blocks,rows,a,device):
         "model":model.state_dict(),
         "normalizers":teacher["normalizers"],
         "calibration":calibration,
-        "latent_dimensions":{"MAG":3,"SWEA":3},
+        "latent_dimensions":{"MAG":5,"SWEA":5},
     })
     print(f"V14 fold {fold}: median={metrics['median_abs_peak_error_s']:.1f}s "
           f"within60={metrics['fraction_within_60s']:.1%} "
@@ -513,7 +515,7 @@ def main():
             )
     summary=v10.summarize(a,finished)
     summary["architecture"]=V14DualBottleneckRefiner.ARCHITECTURE
-    summary["latent_dimensions"]={"MAG":3,"SWEA":3}
+    summary["latent_dimensions"]={"MAG":5,"SWEA":5}
     summary["encoder_conv_layers"]={"MAG":8,"SWEA":8}
     v7.safe_json(a.output_dir/"cv_summary.json",summary)
     print(f"V14 DONE: folds={summary['completed_folds']} "
