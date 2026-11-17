@@ -408,11 +408,15 @@ def _plot_group_features(rows,folder):
                 series.append(x[np.isfinite(x)])
             available=[(g,x) for g,x in zip(groups,series) if len(x)>0]
             if available:
+                # Matplotlib 3.10 removed boxplot(labels=...), while
+                # older releases do not accept tick_labels=.
+                # Set tick text separately to support both APIs.
                 ax.boxplot(
                     [x for _,x in available],
-                    labels=[f"G{g}" for g,_ in available],
                     showfliers=False
                 )
+                ax.set_xticks(np.arange(1,len(available)+1))
+                ax.set_xticklabels([f"G{g}" for g,_ in available])
             ax.set_title(feature,fontsize=10)
             ax.grid(alpha=.2)
         fig.suptitle(f"{sensor}: rasgos medidos por grupo (FIT)")
