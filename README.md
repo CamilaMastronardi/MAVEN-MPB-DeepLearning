@@ -70,17 +70,24 @@ Para analizar estas secciones, primero deben ejecutarse las celdas de inicializa
 
 **Limitaciones:** las clases de referencia son etiquetas débiles; las ventanas pueden solaparse, por lo que no son independientes. Las métricas de clasificación no miden detección autónoma de MPB en una órbita completa. El promedio por índice entre folds puede cancelar correlaciones de canales no alineados; tampoco prueba equivalencia funcional ni significado físico específico, y la falta de datos en caché puede producir matrices parciales.
 
-## Piloto independiente: penalización temporal de la localización MPB
+## Entrenamiento completo V7b con pérdida de localización temporal
 
-El notebook de V7b incluye la sección **6.7**, una celda opcional que ejecuta el script independiente **scripts/03_experiments/04_quick_temporal_loss_pilot.py**. **No modifica** el entrenamiento V7b, sus checkpoints ni las métricas anteriores.
+La sección **6.7** del notebook ejecuta (cuando se habilita el indicador de ejecución) el script separado **scripts/03_experiments/05_train_v7b_temporal_full.py**. A diferencia del piloto antiguo, **entrena desde cero** los modelos de los cuatro folds, en lugar de ajustar un checkpoint durante cuatro épocas.
 
-Se parte de un checkpoint V7b con ranking (fold externo elegido) y se comparan tres variantes con los **mismos eventos de evaluación**: checkpoint original, ajuste fino de control con la loss V7b habitual y ajuste fino con una nueva penalización temporal diferenciable. La penalización es la esperanza softmax de la distancia absoluta entre los centros candidatos y la MPB anotada, normalizada por 600 s. La localización en evaluación sigue usando el argmax global habitual; la etiqueta temporal del fold externo no participa en los gradientes.
+La función objetivo tiene los mismos términos que V7b (clasificación de transición, clasificación de regiones, ranking y dos reconstrucciones), más una pérdida diferenciable de distancia temporal de la MPB con **peso 5**. La probabilidad softmax sobre los candidatos de un mismo evento pondera su error absoluto de tiempo respecto de la MPB catalogada, normalizado por 600 segundos. Durante la evaluación externa se mantiene el **argmax** original.
 
-La configuración actual utiliza **peso temporal 5**, temperatura 1,0 y **4 épocas adicionales**, recorriendo los **cuatro folds** y todos los eventos FIT y de validación externa disponibles en caché. En el script, los argumentos --train-events, --validation-events y --scan-limit aceptan **0 = sin límite**. Los batches se mantienen iguales entre ambas variantes, sin minería dinámica de negativos. Para ejecutar desde el notebook, cambiar RUN_TEMPORAL_PILOT a True en la sección 6.7; también se puede ejecutar el Python por separado por fold con los argumentos de rutas y --help. La ejecución completa puede consumir bastante CPU y memoria.
+Configuración predeterminada:
 
-**No se consulta BigQuery ni se reentrena desde cero**; el script necesita checkpoints y cachés MAG/SWEA existentes y detiene el proceso si son insuficientes. Es una prueba piloto de ajuste fino, no una comparación concluyente ni una nueva validación cruzada completa.
+- Hasta **1000 épocas**, mínimo 10 y **early stopping con paciencia 20**, según la pérdida de MONITOR (transición + regiones + ranking + pérdida temporal, sin reconstrucción).
+- Todos los eventos etiquetados MAG+SWEA de cada uno de los cuatro folds del manifiesto. FIT y MONITOR están separados por meses; la normalización se ajusta en FIT. Se conserva la **minería dinámica de negativos** propia de V7b.
+- Pesos: regiones 0,5; ranking 2; reconstrucción 0,15 para cada instrumento; **temporal 5**. Los demás parámetros de entrenamiento son los de la V7b original.
+- Los datos se leen **exclusivamente de las cachés** MAG/SWEA ya creadas, sin consultas a BigQuery. Si faltan mediciones para algún evento elegible, el experimento se detiene con un mensaje; no se evalúa falsamente un catálogo incompleto. Preparar las cachés con el flujo habitual antes de ejecutarlo.
+- Los checkpoints se guardan en una carpeta nueva, results/metrics/v7b_temporal_full_weight5, con estados de última época, mejor época, modelo final, métricas por fold y resumen CV. Se admite --resume para retomar.
+- La sección 6.7 del notebook permite activarlo cambiando RUN_TEMPORAL_FULL_TRAINING = True, y después muestra las curvas de entrenamiento y una comparación por fold con los resultados V7b guardados. El experimento puede llevar bastante tiempo en CPU.
 
-Los resultados con peso 5 se guardan en results/metrics/v7b_temporal_loss_pilot_weight_5/fold_XX/ (XX = 01–04), **sin sobrescribir el piloto anterior con peso 0,5**. Para cada fold se generan summary.json, paired_event_errors.csv, training_history.csv, training_losses.png y temporal_localization_comparison.png. El notebook además muestra una tabla agregada, el conteo de eventos que mejoran/empeoran y la comparación conjunta de errores; se exportan resumen_agregado.csv y errores_por_evento_agregados.csv.
+El script anterior **scripts/03_experiments/04_quick_temporal_loss_pilot.py** se conserva solo como referencia del **piloto corto de ajuste fino**; **ya no es lo que ejecuta la sección 6.7**. El conjunto de validación externa se usa solamente para evaluar el modelo entrenado, no para optimizarlo ni seleccionar el mejor checkpoint.
+
+**Limitación de la comparación:** si el entrenamiento V7b original utilizó un criterio distinto de early stopping o una cantidad máxima distinta de épocas, la comparación entre ambos entrenamientos no aísla exclusivamente el efecto del nuevo término temporal. Para aislarlo formalmente habría que repetir también el modelo control con el mismo régimen experimental.
 
 ## Uso desde `main`
 
