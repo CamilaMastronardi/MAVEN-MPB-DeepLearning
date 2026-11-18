@@ -58,6 +58,18 @@ Los gráficos se guardan en `results/figures/v7b_notebook/15_ejemplos_forma_scor
 
 Los valores de score sigmoid no están calibrados como probabilidades; las correlaciones reportadas son descriptivas de la muestra efectivamente analizada.
 
+## Matrices de confusión y correlación de canales latentes
+
+El notebook V7b incluye tres análisis adicionales, sin necesidad de reentrenar:
+
+- **6.4:** matriz de confusión de la clasificación de ventanas como MPB próxima o control negativo débil, obtenida de los conteos de los cuatro folds externos (figura `07b_confusion_candidatos.png`).
+- **6.5–6.6:** matriz de confusión de regiones plasmáticas: magnetovaina (0) frente a magnetosfera inducida (1), por fold, global y separada para los lados anterior/posterior. Si los conteos todavía no están en los resultados antiguos, pueden reconstruirse mediante inferencia con checkpoints y cachés MAG/SWEA (figuras `07c_confusion_regiones.png` y `07d_confusion_regiones_por_lado.png`). El análisis calcula los recalls de cada clase y la exactitud balanceada a partir de los resultados disponibles.
+- **8.7:** correlaciones de Pearson entre los 16 canales latentes de cada instrumento, calculadas **entre eventos** sobre la diferencia de activaciones anterior/posterior. Se grafican por fold y por clase (ventanas positivas o controles), sin mezclar los espacios latentes de redes distintas. Las figuras se guardan como `14_correlacion_16_canales_fold_01.png` a `fold_04.png`; las matrices individuales y el resumen se exportan a `results/metrics/v7b_latent_correlations/`.
+
+Para analizar estas secciones, primero deben ejecutarse las celdas de inicialización y lectura de resultados, y, para correlación, la sección **8.1 de extracción de representaciones latentes**. El límite actual de 24 eventos por fold hace que las correlaciones sean exploratorias; se puede aumentar `MAX_LATENT_EVENTS_PER_FOLD` para analizarlas con una muestra mayor, siempre que existan las cachés correspondientes. No se consultará BigQuery durante estos análisis.
+
+**Limitaciones:** las clases de referencia son etiquetas débiles; las ventanas pueden solaparse, por lo que no son independientes. Las métricas de clasificación no miden detección autónoma de MPB en una órbita completa. Las correlaciones de canales no prueban equivalencia funcional ni significado físico específico, y la falta de datos en caché puede producir matrices parciales.
+
 ## Uso desde `main`
 
 La reorganización V7b ya está integrada en **`main`**. Cuando no haya entrenamiento activo y los resultados estén guardados:
