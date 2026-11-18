@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """V7b: piloto independiente para penalizar el error temporal de la MPB.
 
-Compara el checkpoint original con dos ajustes finos breves desde el MISMO
+Compara el checkpoint original con dos ajustes finos desde el MISMO
 checkpoint: control (loss V7b) y temporal (loss V7b + w*E_softmax|dt|/600).
 Los ejemplos FIT y de validacion externa son identicos para ambas variantes.
 SOLO utiliza checkpoints y caches locales. Nunca consulta BigQuery ni
@@ -79,20 +79,24 @@ def arguments():
                  'swea-cache-dir', 'output-dir'):
         p.add_argument('--'+name, type=Path, required=True)
     p.add_argument('--fold', type=int, choices=(1,2,3,4), default=1)
-    p.add_argument('--train-events', type=int, default=12)
-    p.add_argument('--validation-events', type=int, default=6)
-    p.add_argument('--scan-limit', type=int, default=150)
+    p.add_argument('--train-events', type=int, default=0,
+                   help="0 = todos los eventos FIT disponibles en caché.")
+    p.add_argument('--validation-events', type=int, default=0,
+                   help="0 = todos los eventos externos disponibles en caché.")
+    p.add_argument('--scan-limit', type=int, default=0,
+                   help="0 = sin límite de búsqueda de cachés.")
     p.add_argument('--epochs', type=int, default=4)
-    p.add_argument('--weight', type=float, default=0.5)
+    p.add_argument('--weight', type=float, default=5.0)
     p.add_argument('--temperature', type=float, default=1.)
     p.add_argument('--scale-s', type=float, default=600.)
     p.add_argument('--learning-rate', type=float, default=1e-4)
     p.add_argument('--threads', type=int, default=2)
     p.add_argument('--seed', type=int, default=42)
     a = p.parse_args()
-    if min(a.train_events, a.validation_events, a.scan_limit, a.epochs,
-           a.weight, a.temperature, a.scale_s, a.learning_rate, a.threads) <= 0:
-        p.error('Los limites y los hiperparametros deben ser positivos.')
+    if (min(a.train_events, a.validation_events, a.scan_limit) < 0
+            or min(a.epochs, a.weight, a.temperature,
+                   a.scale_s, a.learning_rate, a.threads) <= 0):
+        p.error('Los limites deben ser >= 0 y los hiperparametros > 0.')
     return a
 
 
@@ -112,8 +116,8 @@ def select_cached(rows, n, *, cache, trainer, mpb, bs, rank,
     rng.shuffle(pool)
     selected, candidates = [], {}
     scanned = cached = 0
-    for row in pool[:scan_limit]:
-        if len(selected) >= n:
+    for row in (pool if scan_limit == 0 else pool[:scan_limit]):
+        if n > 0 and len(selected) >= n:
             break
         scanned += 1
         pair = cached_pair(row, cache, trainer)
@@ -134,7 +138,8 @@ def select_cached(rows, n, *, cache, trainer, mpb, bs, rank,
             continue
         selected.append(row)
         candidates[row['time']] = items
-    print(f'{"FIT" if rank else "VAL"}: {len(selected)}/{n} usable, '
+    print(f'{"FIT" if rank else "VAL"}: {len(selected)}/'
+          f'{"todos" if n == 0 else n} usable, '
           f'{cached}/{scanned} with both caches.', flush=True)
     return selected, candidates
 
@@ -235,6 +240,10 @@ def main():
             'Faltan caches MAG/SWEA validas: se requieren al menos 4 FIT '
             'y 3 VAL. No se consulto BigQuery.'
         )
+    if a.train_events == 0 or a.validation_events == 0:
+        print('MODO COMPLETO: incluye todos los eventos elegibles encontrados '
+              'en las caches, sin consultar BigQuery. Si faltan caches, '
+              'la evaluacion sera parcial.', flush=True)
 
     class Config:
         pass
@@ -339,8 +348,15 @@ def main():
         histories['control']+histories['temporal']
     )
     summary = {
-        'pilot': True, 'fold': fold, 'n_fit': len(sel_fit),
-        'n_val': len(sel_val), 'epochs': a.epochs,
+        'pilot': bool(a.train_events or a.validation_events or a.scan_limit),
+        'fold': fold, 'n_fit': len(sel_fit),
+        'n_val': len(sel_val),
+        'n_fit_catalog_eligible': len(fit),
+        'n_val_catalog_eligible': len(val),
+        'train_limit': a.train_events,
+        'validation_limit': a.validation_events,
+        'scan_limit': a.scan_limit,
+        'epochs': a.epochs,
         'learning_rate': a.learning_rate, 'temporal_weight': a.weight,
         'temperature': a.temperature, 'scale_s': a.scale_s,
         'new_loss': 'E_softmax[abs(candidate_center - catalog_MPB)] / scale_s',
