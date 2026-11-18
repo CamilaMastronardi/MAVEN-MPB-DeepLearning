@@ -70,6 +70,18 @@ Para analizar estas secciones, primero deben ejecutarse las celdas de inicializa
 
 **Limitaciones:** las clases de referencia son etiquetas débiles; las ventanas pueden solaparse, por lo que no son independientes. Las métricas de clasificación no miden detección autónoma de MPB en una órbita completa. El promedio por índice entre folds puede cancelar correlaciones de canales no alineados; tampoco prueba equivalencia funcional ni significado físico específico, y la falta de datos en caché puede producir matrices parciales.
 
+## Piloto independiente: penalización temporal de la localización MPB
+
+El notebook de V7b incluye la sección **6.7**, una celda opcional que ejecuta el script independiente **scripts/03_experiments/04_quick_temporal_loss_pilot.py**. **No modifica** el entrenamiento V7b, sus checkpoints ni las métricas anteriores.
+
+Se parte de un checkpoint V7b con ranking (fold externo elegido) y se comparan tres variantes con los **mismos eventos de evaluación**: checkpoint original, ajuste fino de control con la loss V7b habitual y ajuste fino con una nueva penalización temporal diferenciable. La penalización es la esperanza softmax de la distancia absoluta entre los centros candidatos y la MPB anotada, normalizada por 600 s. La localización en evaluación sigue usando el argmax global habitual; la etiqueta temporal del fold externo no participa en los gradientes.
+
+La configuración exploratoria predeterminada utiliza **4 épocas, hasta 12 eventos FIT y 6 eventos de validación externa**, con peso temporal 0,5 y temperatura 1,0. Los batches se mantienen iguales entre ambas variantes, sin minería dinámica de negativos. Para ejecutar desde el notebook, cambiar la variable RUN_TEMPORAL_PILOT a True en la sección 6.7; también se puede ejecutar el archivo Python por separado con los argumentos de rutas de métricas, manifiesto, cachés y salida (consultar --help).
+
+**No se consulta BigQuery ni se reentrena desde cero**; el script necesita checkpoints y cachés MAG/SWEA existentes y detiene el proceso si son insuficientes. Es una prueba piloto de ajuste fino, no una comparación concluyente ni una nueva validación cruzada completa.
+
+Los resultados se guardan bajo results/metrics/v7b_temporal_loss_pilot/fold_01/ en archivos summary.json, paired_event_errors.csv, training_history.csv, training_losses.png y temporal_localization_comparison.png. El gráfico de errores temporales, especialmente su comparación pareada por evento y la fracción dentro de 60 s, es más importante que comparar directamente pérdidas totales con objetivos distintos.
+
 ## Uso desde `main`
 
 La reorganización V7b ya está integrada en **`main`**. Cuando no haya entrenamiento activo y los resultados estén guardados:
