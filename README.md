@@ -52,9 +52,9 @@ docs/
 
 ## Diagnóstico de la forma del score temporal
 
-El notebook \`notebooks/01_MPB_V7b.ipynb\`, sección **7.2–7.3**, incorpora un análisis exploratorio de las curvas de puntuación del modelo en los eventos de validación externa. Calcula prominencia, anchura a media prominencia, diferencia con el mejor candidato separado al menos cinco minutos y número de máximos secundarios. Las anchuras se dejan indefinidas al cruzar huecos de datos o cuando el máximo cae en un extremo.
+El notebook `notebooks/01_MPB_V7b.ipynb`, sección **7.2–7.3**, incorpora un análisis exploratorio de las curvas de puntuación del modelo en los eventos de validación externa. Calcula prominencia, anchura a media prominencia, diferencia con el mejor candidato separado al menos cinco minutos y número de máximos secundarios. Las anchuras se dejan indefinidas al cruzar huecos de datos o cuando el máximo cae en un extremo.
 
-Los gráficos se guardan en \`results/figures/v7b_notebook/15_ejemplos_forma_score.png\` y \`16_morfologia_score_vs_error.png\` (o en la ruta indicada por \`MAVEN_V7B_NOTEBOOK_FIGURES\`). Las curvas reales se almacenan como NPZ en \`results/metrics/v7b_score_shape/curves/\` y sus métricas en \`score_shape_external_folds.csv\`. No se reentrena ni se consulta BigQuery; hacen falta checkpoints de los cuatro folds y cachés MAG/SWEA. De forma predeterminada el notebook procesa hasta 20 cruces evaluables por fold con semilla fija, y se puede ampliar a todos los cruces cacheados.
+Los gráficos se guardan en `results/figures/v7b_notebook/15_ejemplos_forma_score.png` y `16_morfologia_score_vs_error.png` (o en la ruta indicada por `MAVEN_V7B_NOTEBOOK_FIGURES`). Las curvas reales se almacenan como NPZ en `results/metrics/v7b_score_shape/curves/` y sus métricas en `score_shape_external_folds.csv`. No se reentrena ni se consulta BigQuery; hacen falta checkpoints de los cuatro folds y cachés MAG/SWEA. De forma predeterminada el notebook procesa hasta 20 cruces evaluables por fold con semilla fija, y se puede ampliar a todos los cruces cacheados.
 
 Los valores de score sigmoid no están calibrados como probabilidades; las correlaciones reportadas son descriptivas de la muestra efectivamente analizada.
 
