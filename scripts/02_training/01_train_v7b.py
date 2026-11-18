@@ -624,6 +624,8 @@ def evaluate_fold(model, val_candidates, norm, args, device, threshold, val):
     records = []
     tp = fp = fn = tn = 0
     region_correct = region_total = 0
+    # Filas=región débil real, columnas=predicción (0: vaina, 1: inducida).
+    region_cm_by_side = np.zeros((2, 2, 2), dtype=np.int64)
     for row in val:
         event_time = row["time"]
         prepared = val_candidates.get(event_time, [])
@@ -665,6 +667,11 @@ def evaluate_fold(model, val_candidates, norm, args, device, threshold, val):
                     region_correct += int(np.sum(
                         region_predictions[j] == target
                     ))
+                    for side_index in range(2):
+                        region_cm_by_side[
+                            side_index, int(target[side_index]),
+                            int(region_predictions[j, side_index])
+                        ] += 1
                     region_total += 2
         if scores:
             j = int(np.argmax(scores))
@@ -702,6 +709,13 @@ def evaluate_fold(model, val_candidates, norm, args, device, threshold, val):
         "candidate_weak_recall": tp/max(1, tp+fn),
         "candidate_weak_f1": 2*tp/max(1, 2*tp+fp+fn),
         "weak_region_accuracy": region_correct/max(1, region_total),
+        "weak_region_confusion": {
+            "classes": ["magnetosheath", "induced_magnetosphere"],
+            "left": region_cm_by_side[0].tolist(),
+            "right": region_cm_by_side[1].tolist(),
+            "combined": region_cm_by_side.sum(axis=0).tolist(),
+            "n_labeled_window_sides": int(region_total),
+        },
         "note": (
             "Localization is CONDITIONAL on a labeled MPB in +/-30 min. "
             "Candidate F1 uses weak catalog labels, not full-orbit precision."
