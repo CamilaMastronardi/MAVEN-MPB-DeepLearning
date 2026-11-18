@@ -34,6 +34,8 @@ scripts/
     02_compare_rank_margin.py
     03_run_region_weight.sh       Barrido del peso de regiones
     03_compare_region_weight.py
+    04_quick_temporal_loss_pilot.py  Piloto anterior de ajuste fino
+    05_train_v7b_temporal_full.py Entrenamiento completo desde cero
 notebooks/
   01_MPB_V7b.ipynb                Informe científico
 tests/
@@ -43,6 +45,7 @@ tests/
   test_04_rank_margin.py
   test_05_region_weight.py
   test_06_score_shape.py
+  test_07_temporal_full_training.py
 docs/
   01_data_preparation.md
   02_model_v7b.md
