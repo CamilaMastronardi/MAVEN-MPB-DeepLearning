@@ -1,131 +1,196 @@
-# MAVEN–MPB: localización de la frontera MPB con V7b
+# Localización temporal de la MPB de Marte con MAVEN
 
-Trabajo final de **Machine Learning en Geofluidos** (UBA). La versión activa es **V7b**, un modelo convolucional de MAG+SWEA con supervisión débil de regiones y ranking de candidatos del mismo evento.
+**Trabajo final — Machine Learning en Geofluidos · Universidad de Buenos Aires**
 
-La rama `main` está dedicada a V7b. Los prototipos V9/V10/V14, los modelos MAG-only y las pruebas tanh fueron retirados del árbol, pero permanecen recuperables en el historial Git.
+Este proyecto estudia la localización temporal de la **Magnetic Pileup Boundary (MPB)** de Marte utilizando las observaciones de **MAG** y **SWEA** de la misión MAVEN. Se desarrolla y evalúa **V7b**, una red neuronal convolucional multimodal que combina clasificación de transiciones, clasificación auxiliar de regiones plasmáticas, reconstrucción de las señales y *ranking* de ventanas candidatas.
 
-## Organización
+### Entrega y enlaces principales
 
-```text
-data/
-  labels/                         Catálogos MPB originales y curados
-  splits/                         Manifiesto CV de cuatro folds mensuales
-src/
-  preprocessing/
-    bigquery_source.py            Consultas, schema y límites BigQuery
-    catalog.py                    Validación de manifiesto y MAG
-    cv_splits.py                  Separación FIT/MONITOR por meses
-    mag_cache.py, swea_cache.py   Lectura/escritura de caché científica
-    weak_regions.py               Ejemplos y etiquetas débiles MPB/BS
-    native_windows.py             Ventanas, normalización, máscaras
-  model/
-    v7b.py                        CNN, decoders y cabezas de clasificación
-    ranking.py                    Ranking y minería de negativos difíciles
-    score_shape.py                Descriptores de picos temporales con manejo de gaps
-scripts/
-  01_data/
-    01_build_cv_manifest.py       Regeneración explícita de folds
-  02_training/
-    01_train_v7b.py               Entrenamiento y evaluación CV
-  03_experiments/
-    01_run_rank_weight.sh         Barrido de peso de ranking
-    01_compare_rank_weight.py
-    02_run_rank_margin.sh         Barrido del margen
-    02_compare_rank_margin.py
-    03_run_region_weight.sh       Barrido del peso de regiones
-    03_compare_region_weight.py
-    04_quick_temporal_loss_pilot.py  Piloto anterior de ajuste fino
-    05_train_v7b_temporal_full.py Entrenamiento completo desde cero
-notebooks/
-  01_MPB_V7b.ipynb                Informe científico
-tests/
-  test_01_preprocessing.py
-  test_02_model.py
-  test_03_rank_weight.py
-  test_04_rank_margin.py
-  test_05_region_weight.py
-  test_06_score_shape.py
-  test_07_temporal_full_training.py
-docs/
-  01_data_preparation.md
-  02_model_v7b.md
-  03_training.md
-  04_hyperparameter_experiments.md
-```
+- **[Notebook del trabajo final — 01_MPB_V7b.ipynb](notebooks/01_MPB_V7b.ipynb)**: explicación física, metodología, arquitectura, entrenamiento, evaluación y análisis de las representaciones latentes. Es el **documento principal** de la entrega.
+- **[Implementación del modelo](src/model/v7b.py)** y **[pérdida de ranking](src/model/ranking.py)**.
+- **[Entrenador V7b](scripts/02_training/01_train_v7b.py)**: validación cruzada, selección de checkpoints y evaluación.
+- **[Documentación técnica](docs/)**: preparación de datos, arquitectura, entrenamiento y experimentos.
 
-## Diagnóstico de la forma del score temporal
+> **Alcance de la evaluación.** El modelo busca el instante de máxima puntuación dentro de un intervalo de **±30 minutos de una MPB catalogada**. Esto evalúa la capacidad de **localizar** un cruce conocido; no demuestra todavía la detección autónoma de MPB en órbitas completas.
 
-El notebook `notebooks/01_MPB_V7b.ipynb`, sección **7.2–7.3**, incorpora un análisis exploratorio de las curvas de puntuación del modelo en los eventos de validación externa. Calcula prominencia, anchura a media prominencia, diferencia con el mejor candidato separado al menos cinco minutos y número de máximos secundarios. Las anchuras se dejan indefinidas al cruzar huecos de datos o cuando el máximo cae en un extremo.
+## 1. Datos y preparación
 
-Los gráficos se guardan en `results/figures/v7b_notebook/15_ejemplos_forma_score.png` y `16_morfologia_score_vs_error.png` (o en la ruta indicada por `MAVEN_V7B_NOTEBOOK_FIGURES`). Las curvas reales se almacenan como NPZ en `results/metrics/v7b_score_shape/curves/` y sus métricas en `score_shape_external_folds.csv`. No se reentrena ni se consulta BigQuery; hacen falta checkpoints de los cuatro folds y cachés MAG/SWEA. De forma predeterminada el notebook procesa hasta 20 cruces evaluables por fold con semilla fija, y se puede ampliar a todos los cruces cacheados.
+El catálogo de referencia contiene **569 cruces MPB**, de los cuales **559** tienen cobertura SWEA indicada en el manifiesto. La disponibilidad efectiva para cada análisis depende de la calidad y continuidad de las mediciones de ambos instrumentos.
 
-Los valores de score sigmoid no están calibrados como probabilidades; las correlaciones reportadas son descriptivas de la muestra efectivamente analizada.
+| Instrumento | Variables de entrada | Cadencia aproximada | Preprocesamiento |
+| --- | --- | --- | --- |
+| **MAG** | \(B_x,B_y,B_z,\lvert\mathbf B\rvert\) (**4 canales**) | 1 s | Control de calidad y normalización por canal |
+| **SWEA** | Intensidad electrónica en **12 canales energéticos** entre 30 y 300 eV | 32 s | Promedio angular, interpolación **en energía**, `log1p` y normalización |
 
-## Matrices de confusión y correlación de canales latentes
+Cada candidato es una ventana de **600 segundos** (±300 s alrededor de un centro). MAG y SWEA conservan **sus cadencias nativas**: no se interpola SWEA temporalmente para igualarla con MAG. Las ventanas incompletas, inválidas o con discontinuidades incompatibles se excluyen.
 
-El notebook V7b incluye tres análisis adicionales, sin necesidad de reentrenar:
+La normalización se ajusta exclusivamente con datos del subconjunto **FIT** correspondiente. Las etiquetas de transición y de región se construyen con los instantes catalogados de MPB y *bow shock* (BS); son **etiquetas débiles**, no un etiquetado independiente de todas las regiones a partir de las mediciones.
 
-- **6.4:** matriz de confusión de la clasificación de ventanas como MPB próxima o control negativo débil, obtenida de los conteos de los cuatro folds externos (figura `07b_confusion_candidatos.png`).
-- **6.5–6.6:** matriz de confusión de regiones plasmáticas: magnetovaina (0) frente a magnetosfera inducida (1), por fold, global y separada para los lados anterior/posterior. Si los conteos todavía no están en los resultados antiguos, pueden reconstruirse mediante inferencia con checkpoints y cachés MAG/SWEA (figuras `07c_confusion_regiones.png` y `07d_confusion_regiones_por_lado.png`). El análisis calcula los recalls de cada clase y la exactitud balanceada a partir de los resultados disponibles.
-- **8.7:** dos matrices de Pearson de 16 × 16, una para MAG y otra para SWEA. Primero se resume cada ventana promediando los dos lados del embedding y después cada evento promediando sus ventanas. Las correlaciones se calculan por fold y se promedian por índice de canal entre los folds disponibles; se ordenan mediante clustering jerárquico. Se guarda una sola figura (`14_correlacion_promedio_MAG_SWEA.png`) y CSVs de las matrices, el orden de canales y la cantidad de folds que aportan cada coeficiente. **Limitación:** los índices latentes de distintas redes no están alineados, por lo que la media es exploratoria.
+El conjunto de datos se divide en **cuatro folds externos agrupados por mes UTC**. Dentro de los tres folds de entrenamiento se separan, también por meses, FIT (actualización de pesos) y **MONITOR** (selección de checkpoints y umbrales), evitando superposiciones de los intervalos físicos usados.
 
-Para analizar estas secciones, primero deben ejecutarse las celdas de inicialización y lectura de resultados, y, para correlación, la sección **8.1 de extracción de representaciones latentes**. El límite actual de 24 eventos por fold hace que las correlaciones sean exploratorias; se puede aumentar `MAX_LATENT_EVENTS_PER_FOLD` para analizarlas con una muestra mayor, siempre que existan las cachés correspondientes. No se consultará BigQuery durante estos análisis.
+## 2. Arquitectura V7b
 
-**Limitaciones:** las clases de referencia son etiquetas débiles; las ventanas pueden solaparse, por lo que no son independientes. Las métricas de clasificación no miden detección autónoma de MPB en una órbita completa. El promedio por índice entre folds puede cancelar correlaciones de canales no alineados; tampoco prueba equivalencia funcional ni significado físico específico, y la falta de datos en caché puede producir matrices parciales.
+Cada instrumento pasa por un **encoder convolucional 1D independiente**, con una primera convolución de 24 canales, bloques residuales dilatados y una salida de **16 series temporales latentes**. Las dilataciones de los bloques son 1, 2, 4 y 8 para MAG, y 1 y 2 para SWEA.
 
-## Entrenamiento completo V7b con pérdida de localización temporal
+Para cada ventana candidata se consideran los tiempos relativos a su centro \(t=0\):
 
-La sección **6.7** del notebook ejecuta (cuando se habilita el indicador de ejecución) el script separado **scripts/03_experiments/05_train_v7b_temporal_full.py**. A diferencia del piloto antiguo, **entrena desde cero** los modelos de los cuatro folds, en lugar de ajustar un checkpoint durante cuatro épocas.
+- **Lado anterior:** muestras válidas entre −300 y −60 s.
+- **Región central excluida del *pooling*:** entre −60 y +60 s.
+- **Lado posterior:** muestras válidas entre +60 y +300 s.
 
-La función objetivo tiene los mismos términos que V7b (clasificación de transición, clasificación de regiones, ranking y dos reconstrucciones), más una pérdida diferenciable de distancia temporal de la MPB con **peso 5**. La probabilidad softmax sobre los candidatos de un mismo evento pondera su error absoluto de tiempo respecto de la MPB catalogada, normalizado por 600 segundos. Durante la evaluación externa se mantiene el **argmax** original.
+Se promedia **cada uno de los 16 canales latentes en el tiempo**, de manera independiente para MAG y SWEA y usando las máscaras y los tiempos propios de cada instrumento. Así se obtienen **16 valores por instrumento y por lado**, que se concatenan en un vector de **32 características anterior** y otro de **32 posterior**. No se dividen los canales en dos grupos: se resumen **los mismos 16 canales antes y después**.
 
-Configuración predeterminada:
+La arquitectura tiene tres objetivos complementarios:
 
-- Hasta **1000 épocas**, mínimo 10 y **early stopping con paciencia 20**, según la pérdida de MONITOR (transición + regiones + ranking + pérdida temporal, sin reconstrucción).
-- Todos los eventos etiquetados MAG+SWEA de cada uno de los cuatro folds del manifiesto. FIT y MONITOR están separados por meses; la normalización se ajusta en FIT. Se conserva la **minería dinámica de negativos** propia de V7b.
-- Pesos: regiones 0,5; ranking 2; reconstrucción 0,15 para cada instrumento; **temporal 5**. Los demás parámetros de entrenamiento son los de la V7b original.
-- Los datos se leen **exclusivamente de las cachés** MAG/SWEA ya creadas, sin consultas a BigQuery. Si faltan mediciones para algún evento elegible, el experimento se detiene con un mensaje; no se evalúa falsamente un catálogo incompleto. Preparar las cachés con el flujo habitual antes de ejecutarlo.
-- Los checkpoints se guardan en una carpeta nueva, results/metrics/v7b_temporal_full_weight5, con estados de última época, mejor época, modelo final, métricas por fold y resumen CV. Se admite --resume para retomar.
-- La sección 6.7 del notebook permite activarlo cambiando RUN_TEMPORAL_FULL_TRAINING = True, y después muestra las curvas de entrenamiento y una comparación por fold con los resultados V7b guardados. El experimento puede llevar bastante tiempo en CPU.
+1. **Transición MPB:** una cabeza utiliza los vectores anterior y posterior, su diferencia y la magnitud de esa diferencia para producir un logit de compatibilidad con un cruce.
+2. **Región plasmática:** una cabeza auxiliar clasifica cada lado como **magnetovaina** o **magnetosfera inducida** a partir de etiquetas débiles.
+3. **Reconstrucción:** decodificadores específicos de MAG y SWEA reconstruyen las entradas normalizadas para regularizar las representaciones.
 
-El script anterior **scripts/03_experiments/04_quick_temporal_loss_pilot.py** se conserva solo como referencia del **piloto corto de ajuste fino**; **ya no es lo que ejecuta la sección 6.7**. El conjunto de validación externa se usa solamente para evaluar el modelo entrenado, no para optimizarlo ni seleccionar el mejor checkpoint.
+Los **16 canales latentes por instrumento** son una decisión de capacidad expresiva del modelo y no se interpretan como 16 variables físicas independientes.
 
-**Limitación de la comparación:** si el entrenamiento V7b original utilizó un criterio distinto de early stopping o una cantidad máxima distinta de épocas, la comparación entre ambos entrenamientos no aísla exclusivamente el efecto del nuevo término temporal. Para aislarlo formalmente habría que repetir también el modelo control con el mismo régimen experimental.
+## 3. Entrenamiento con ranking
 
-## Uso desde `main`
+Para cada evento se forman grupos de candidatos: hasta **dos positivos** centrados cerca del cruce catalogado, **dos negativos difíciles** identificados mediante las puntuaciones de épocas anteriores y **dos controles negativos aleatorios**. Todos pertenecen al mismo evento. La memoria de negativos difíciles se construye **solo con FIT**.
 
-La reorganización V7b ya está integrada en **`main`**. Cuando no haya entrenamiento activo y los resultados estén guardados:
+La pérdida del modelo de referencia es:
+
+\[
+\mathcal{L}_{\mathrm{V7b}}=
+\mathcal{L}_{\mathrm{trans}}
++0.5\,\mathcal{L}_{\mathrm{región}}
++2\,\mathcal{L}_{\mathrm{rank}}
++0.15\,\mathcal{L}_{\mathrm{rec,MAG}}
++0.15\,\mathcal{L}_{\mathrm{rec,SWEA}}.
+\]
+
+La componente de ranking penaliza que un control negativo reciba un logit mayor o demasiado cercano al de un positivo del **mismo cruce**. Esto permite entrenar comparaciones relativas y no solamente una clasificación independiente por ventana.
+
+El entrenamiento de referencia utiliza **AdamW** (tasa de aprendizaje \(3\times 10^{-4}\), *weight decay* \(10^{-3}\)), tamaño de lote **16**, semilla **42**, máximo **100 épocas** y *early stopping* con paciencia **8**. Los pesos, el margen de ranking y otras opciones pueden modificarse mediante argumentos del entrenador; los valores concretos deben comprobarse en las métricas de la corrida analizada.
+
+## 4. Evaluación y análisis del notebook
+
+En cada fold externo se recorren centros candidatos cada **32 s** dentro de los **±30 min** del instante catalogado. Se evalúan las ventanas que tienen datos válidos de ambos instrumentos y se selecciona el centro con **mayor puntuación de transición**:
+
+\[
+\hat t_{\mathrm{MPB}}=\operatorname*{arg\,max}_{t_i}
+\sigma\bigl(s(t_i)\bigr),\qquad
+\epsilon=\lvert \hat t_{\mathrm{MPB}}-t_{\mathrm{MPB}}\rvert.
+\]
+
+El notebook incluye:
+
+| Secciones | Contenido |
+| --- | --- |
+| **1–2** | Contexto físico, catálogo, MAG/SWEA, cobertura y divisiones temporales |
+| **3–4** | Candidatos positivos/negativos, ranking, encoders, decoders y cabezas de clasificación |
+| **5** | Configuración y ejecución reproducible del entrenamiento V7b |
+| **6.1–6.3** | Evolución de las pérdidas, métricas por fold y distribución del error temporal |
+| **6.4–6.6** | Matrices de confusión de candidatos MPB/control y de regiones plasmáticas |
+| **6.7** | Experimento **opcional e independiente** con pérdida temporal explícita |
+| **7** | Curvas del score de transición, morfología de picos y relación con el error |
+| **8** | Mapas latentes, PCA, diferencias entre lados, casos individuales y correlaciones de canales |
+| **9** | Discusión, limitaciones y trabajos futuros |
+
+Entre las métricas se reportan el **error absoluto mediano de localización**, la **fracción de cruces dentro de 60 y 120 s**, las métricas de clasificación de candidatos con etiquetas débiles y la clasificación de regiones. Las matrices de confusión por candidato **no equivalen** a las métricas de localización por evento.
+
+En la sección 8.7 se muestran **dos matrices de correlación promedio de 16 × 16**, una para MAG y otra para SWEA, ordenadas mediante agrupamiento jerárquico. Son un análisis **exploratorio**: los canales de redes entrenadas independientemente **no están alineados semánticamente** entre folds, por lo que su promedio por índice no permite afirmar que representen las mismas características físicas.
+
+## 5. Reproducibilidad
+
+### Entorno
+
+Desde la raíz del repositorio:
 
 ```bash
-cd ~/Codigos/MAVEN-MPB-DeepLearning
-git status
-git fetch origin
-git switch main
-git pull --ff-only origin main
+git clone https://github.com/CamilaMastronardi/MAVEN-MPB-DeepLearning.git
+cd MAVEN-MPB-DeepLearning
+python -m venv .venv
 source .venv/bin/activate
+python -m pip install -r requirements.txt
 python -m unittest discover -s tests -v
+jupyter lab notebooks/01_MPB_V7b.ipynb
 ```
 
-Si aparecen modificaciones locales, guardarlas antes del cambio de rama (por ejemplo con `git stash push -u`). La rama temporal de reorganización ya no es necesaria para trabajar.
+El notebook también contempla ejecución local o en Colab. Las celdas de inicialización permiten definir por separado el directorio de código y el de datos mediante `MAVEN_V7B_REPO_DIR` y `MAVEN_V7B_DATA_ROOT`.
 
-Ejecutar el entrenamiento V7b con los hiperparámetros actuales:
+**Para consultar resultados existentes:** abrir el notebook, ejecutar las celdas iniciales y disponer de los archivos de métricas, checkpoints y cachés usados en la corrida. La variable `RUN_TRAINING` está inicialmente en `False`: abrir el notebook **no ejecuta automáticamente** el entrenamiento. Las figuras que dependen de observaciones MAVEN o checkpoints no pueden reproducirse únicamente con el código fuente.
+
+### Entrenamiento V7b de referencia
 
 ```bash
 python scripts/02_training/01_train_v7b.py \
-  --folds all --rank-weight 2 --rank-margin 0.25 --region-weight 0.5 \
-  --output-dir results/metrics/v7b_manual --resume --execute
+  --folds all \
+  --rank-weight 2 --rank-margin 0.25 \
+  --region-weight 0.5 --reconstruction-weight 0.15 \
+  --output-dir results/metrics/v7b_manual \
+  --max-epochs 100 --patience 8 \
+  --resume --execute
 ```
 
-Para el barrido en curso, con las mismas carpetas locales y reutilización de la referencia:
+El entrenador reutiliza datos MAG/SWEA en caché. Si faltan, puede acceder a **BigQuery** con autenticación y límites de consulta, por lo que esta operación no debe confundirse con la simple visualización del notebook. Los datos originales y las cachés voluminosas no se distribuyen junto con el código. El proyecto incluye los módulos de preparación y el manifiesto de validación cruzada.
+
+### Experimento adicional: penalización temporal
+
+La sección **6.7** usa un script **separado**, [`05_train_v7b_temporal_full.py`](scripts/03_experiments/05_train_v7b_temporal_full.py), que entrena **desde cero** con:
+
+\[
+\mathcal{L}_{\mathrm{nueva}}=
+\mathcal{L}_{\mathrm{V7b}}+
+5\mathcal{L}_{\mathrm{temporal}},
+\]
+
+donde \(\mathcal{L}_{\mathrm{temporal}}\) es la distancia absoluta al instante MPB catalogado ponderada por un **softmax diferenciable de los logits de los candidatos del mismo evento**, normalizada por 600 s.
 
 ```bash
-bash scripts/03_experiments/03_run_region_weight.sh
+python scripts/03_experiments/05_train_v7b_temporal_full.py \
+  --folds all --temporal-weight 5 \
+  --max-epochs 1000 --patience 20 --resume
 ```
 
-Los directorios `data/cache/` y `results/` se conservan localmente y permanecen ignorados por Git. **Actualizar `main` no elimina esos archivos ignorados por Git.**
+Este experimento conserva los cuatro folds, la minería de negativos y la separación FIT/MONITOR. **Solo lee cachés locales** y se detiene si falta la cobertura de algún evento elegible; **no consulta BigQuery**. Guarda los resultados por separado en `results/metrics/v7b_temporal_full_weight5/`.
 
-## Alcance físico
+**Estado:** la sección y su script están implementados; **no se afirma aquí que el entrenamiento completo esté ejecutado ni que mejore los resultados**. El script [`04_quick_temporal_loss_pilot.py`](scripts/03_experiments/04_quick_temporal_loss_pilot.py) corresponde a un experimento anterior de **ajuste fino**, distinto del entrenamiento desde cero. Además, el cambio de máximo de épocas y paciencia impide atribuir eventuales diferencias únicamente a la nueva pérdida sin repetir un control con la misma configuración.
 
-V7b estima el instante más compatible con la MPB dentro de **±30 minutos de una MPB ya catalogada**, explorando ventanas MAG+SWEA de diez minutos. No se ha validado la detección autónoma de todas las MPB presentes en órbitas completas.
+## 6. Organización del repositorio
 
-Documentación técnica: [datos](docs/01_data_preparation.md) · [modelo](docs/02_model_v7b.md) · [entrenamiento](docs/03_training.md) · [experimentos](docs/04_hyperparameter_experiments.md).
+```text
+data/                         Catálogo y manifiesto de los folds
+docs/                         Documentación técnica del proceso
+notebooks/
+  01_MPB_V7b.ipynb            Trabajo final (informe principal)
+src/
+  preprocessing/              BigQuery, cachés, etiquetas débiles, ventanas y folds
+  model/
+    v7b.py                    Arquitectura MAG+SWEA y reconstrucción
+    ranking.py                Pérdida de ranking y negativos difíciles
+    score_shape.py            Análisis de picos del score
+scripts/
+  01_data/                    Preparación de manifiestos
+  02_training/                Entrenamiento V7b de referencia
+  03_experiments/             Barridos y experimentos adicionales
+    04_quick_temporal_loss_pilot.py
+    05_train_v7b_temporal_full.py
+tests/                        Pruebas unitarias sin datos BigQuery
+requirements.txt              Dependencias de Python
+```
+
+Los directorios de caché y resultados generados en las ejecuciones se mantienen **localmente**, según las reglas de `.gitignore`. Para replicar todas las figuras y métricas se requieren también los datos y checkpoints de las corridas correspondientes.
+
+## 7. Limitaciones
+
+- Las etiquetas MPB/control y magnetovaina/magnetosfera inducida son **débiles** y dependen de anotaciones catalogadas.
+- Los resultados de localización están **condicionados a la presencia de una MPB catalogada** en el intervalo estudiado; no miden precisión o *recall* de detección sobre órbitas completas.
+- Las ventanas de un mismo evento se superponen temporalmente y **no constituyen observaciones independientes** para interpretar las matrices de confusión.
+- El análisis del espacio latente es exploratorio; las correlaciones, por sí solas, **no prueban redundancia funcional ni identifican una magnitud física** en cada canal.
+- La cobertura y reproducibilidad de las figuras dependen de los datos de MAG/SWEA y checkpoints disponibles localmente.
+- Los barridos de hiperparámetros son **exploratorios**: comparar decisiones tomadas observando resultados de los folds externos no equivale a una estimación de desempeño completamente independiente.
+
+### Documentación técnica
+
+[Preparación de datos](docs/01_data_preparation.md) ·
+[Modelo V7b](docs/02_model_v7b.md) ·
+[Entrenamiento](docs/03_training.md) ·
+[Experimentos de hiperparámetros](docs/04_hyperparameter_experiments.md)
+
+**Misión:** [MAVEN — NASA](https://science.nasa.gov/mission/maven/) ·
+**Licencia del código:** [LICENSE](LICENSE)
