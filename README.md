@@ -86,7 +86,6 @@ El notebook incluye:
 | **5** | Configuración y ejecución reproducible del entrenamiento V7b |
 | **6.1–6.3** | Evolución de las pérdidas, métricas por fold y distribución del error temporal |
 | **6.4–6.6** | Matrices de confusión de candidatos MPB/control y de regiones plasmáticas |
-| **6.7** | Experimento **opcional e independiente** con pérdida temporal explícita |
 | **7** | Curvas del score de transición, morfología de picos y relación con el error |
 | **8** | Mapas latentes, PCA, diferencias entre lados, casos individuales y correlaciones de canales |
 | **9** | Discusión, limitaciones y trabajos futuros |
@@ -129,28 +128,6 @@ python scripts/02_training/01_train_v7b.py \
 
 El entrenador reutiliza datos MAG/SWEA en caché. Si faltan, puede acceder a **BigQuery** con autenticación y límites de consulta, por lo que esta operación no debe confundirse con la simple visualización del notebook. Los datos originales y las cachés voluminosas no se distribuyen junto con el código. El proyecto incluye los módulos de preparación y el manifiesto de validación cruzada.
 
-### Experimento adicional: penalización temporal
-
-La sección **6.7** usa un script **separado**, [`05_train_v7b_temporal_full.py`](scripts/03_experiments/05_train_v7b_temporal_full.py), que entrena **desde cero** con:
-
-\[
-\mathcal{L}_{\mathrm{nueva}}=
-\mathcal{L}_{\mathrm{V7b}}+
-5\mathcal{L}_{\mathrm{temporal}},
-\]
-
-donde \(\mathcal{L}_{\mathrm{temporal}}\) es la distancia absoluta al instante MPB catalogado ponderada por un **softmax diferenciable de los logits de los candidatos del mismo evento**, normalizada por 600 s.
-
-```bash
-python scripts/03_experiments/05_train_v7b_temporal_full.py \
-  --folds all --temporal-weight 5 \
-  --max-epochs 1000 --patience 20 --resume
-```
-
-Este experimento conserva los cuatro folds, la minería de negativos y la separación FIT/MONITOR. **Solo lee cachés locales** y se detiene si falta la cobertura de algún evento elegible; **no consulta BigQuery**. Guarda los resultados por separado en `results/metrics/v7b_temporal_full_weight5/`.
-
-**Estado:** la sección y su script están implementados; **no se afirma aquí que el entrenamiento completo esté ejecutado ni que mejore los resultados**. El script [`04_quick_temporal_loss_pilot.py`](scripts/03_experiments/04_quick_temporal_loss_pilot.py) corresponde a un experimento anterior de **ajuste fino**, distinto del entrenamiento desde cero. Además, el cambio de máximo de épocas y paciencia impide atribuir eventuales diferencias únicamente a la nueva pérdida sin repetir un control con la misma configuración.
-
 ## 6. Organización del repositorio
 
 ```text
@@ -168,8 +145,6 @@ scripts/
   01_data/                    Preparación de manifiestos
   02_training/                Entrenamiento V7b de referencia
   03_experiments/             Barridos y experimentos adicionales
-    04_quick_temporal_loss_pilot.py
-    05_train_v7b_temporal_full.py
 tests/                        Pruebas unitarias sin datos BigQuery
 requirements.txt              Dependencias de Python
 ```
